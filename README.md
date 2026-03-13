@@ -14,8 +14,9 @@ Five interactive modes let you explore colour, skeleton, and depth data from a K
 | `3` | **3D Skeleton** | Metric 3-D skeleton rendered with lit sphere joints and bone lines. Includes a ground-plane reference grid. |
 | `4` | **AR** | Augmented Reality – every depth pixel placed at its real-world (x, y, z) position and coloured by the matching colour-image texel, producing a navigable 3-D scene reconstruction. |
 | `5` | **Depth** | Depth point cloud colour-graded by distance: red (near, ~0.5 m) → green → blue (far, ~5 m). |
+| `6` | **Audio** | Depth cloud with Z displacement and colour brightness intensified in real time by the system audio spectrum. Each pixel's radial position maps to a frequency band (same log-curve as the standalone AudioVisualizer). Bass energy at the edges, treble at the centre. Requires `WasapiLoopback.dll`. |
 
-### 3-D mode controls (modes 3, 4, 5)
+### 3-D mode controls (modes 3, 4, 5, 6)
 
 | Input | Action |
 |-------|--------|
@@ -31,11 +32,9 @@ Five interactive modes let you explore colour, skeleton, and depth data from a K
 
 | Requirement | Version |
 |-------------|---------|
-| Java | 17+ |
 | Kinect v2 sensor | — |
 | Kinect for Windows Runtime v2 | [Microsoft Download](https://www.microsoft.com/en-us/download/details.aspx?id=44559) |
 | Kinect for Windows SDK v2 | [Microsoft Download](https://www.microsoft.com/en-us/download/details.aspx?id=44561) |
-| J4K native DLL | Bundled with `ufdw.jar` (see below) |
 
 > **Windows only.** The Kinect v2 SDK and its runtime are Windows-exclusive.
 
@@ -56,44 +55,15 @@ kinect/
 │       ├── SkeletonVisualizer3D.java  # Mode 3 – metric 3-D skeleton
 │       ├── ARVisualizer.java      # Mode 4 – UV-mapped 3-D point cloud (AR)
 │       ├── DepthVisualizer.java   # Mode 5 – depth-coloured point cloud
+│       ├── AudioVisualizer.java   # Mode 6 – depth cloud + audio-reactive Z/colour
+│       ├── WasapiLoopbackCapture.java  # JNA wrapper for WasapiLoopback.dll
+│       ├── FFTAnalyzer.java       # Per-band AGC + tanh compression FFT analyser
 │       └── SkeletonConstants.java # Bone topology, joint count, per-body colours
 ├── lwjgl3/                        # Desktop (LWJGL3) launcher and packaging
 │   └── src/main/java/.../Lwjgl3Launcher.java
 ├── libs/                          # Local JARs (not committed – see setup below)
 │   └── ufdw.jar
 └── README.md
-```
-
----
-
-## Setup
-
-### 1. Get the J4K library
-
-Download `ufdw.jar` from the [J4K project page](https://abarmpou.github.io/ufdw/j4k/) and place it in the `libs/` folder at the project root (create the folder if it does not exist):
-
-```
-kinect/
-└── libs/
-    └── ufdw.jar
-```
-
-The `build.gradle` files reference this path automatically – no further configuration is needed.
-
-### 2. Install the Kinect runtime
-
-Install the **Kinect for Windows Runtime v2** on your Windows machine.  
-The native DLLs required by J4K are included in the runtime; they do not need to be placed manually.
-
-### 3. Build and run
-
-```bash
-# Run directly from Gradle (recommended during development)
-./gradlew lwjgl3:run
-
-# Build a self-contained fat JAR
-./gradlew lwjgl3:jar
-java -jar lwjgl3/build/libs/kinect-1.0.jar
 ```
 
 ---
@@ -127,6 +97,22 @@ Modes 3–5 are instantiated **lazily** – no GPU memory is allocated until the
 | `getColorFrame()` | Raw BGRA bytes at 1920 × 1080 |
 | `getDepthXYZ()` | Per-pixel 3-D positions in metres (`float[512×424×3]`) |
 | `getDepthUV()` | Per-pixel colour-image UVs (`float[512×424×2]`) |
+
+### AudioVisualizer
+
+`AudioVisualizer` builds on top of the AR point-cloud pipeline.  Each depth pixel
+carries an extra `intensity` vertex attribute — the smoothed FFT band value [0, 1]
+for its radial position in the depth image.
+
+The GLSL shader applies it in two places:
+- **Vertex stage** — `z *= (1 + intensity × Z_INTENSIFY)` stretches the cloud
+  outward on loud beats.
+- **Fragment stage** — `colour.rgb *= (1 + intensity × COLOR_BOOST)` brightens
+  pixels whose frequency band is currently loud.
+
+Band mapping uses the same logarithmic radial curve as the standalone
+`AudioVisualizerGame`: outer pixels → low-frequency bands (bass at the edges);
+inner pixels → high-frequency bands (treble at the centre).
 
 ### OrbitCamera
 
