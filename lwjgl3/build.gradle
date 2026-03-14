@@ -25,7 +25,7 @@ eclipse.project.name = appName + '-lwjgl3'
 java.sourceCompatibility = 17
 java.targetCompatibility = 17
 if (JavaVersion.current().isJava9Compatible()) {
-        compileJava.options.release.set(17)
+  compileJava.options.release.set(17)
 }
 
 dependencies {
@@ -35,6 +35,9 @@ dependencies {
 
   // J4K (Java for Kinect) – ufdw.jar must be placed in the libs/ folder.
   implementation fileTree(dir: "${rootProject.projectDir}/libs", include: '*.jar')
+
+  // JNA – required by WasapiLoopbackCapture (AudioVisualizer mode)
+  implementation 'net.java.dev.jna:jna:5.14.0'
 
   if(enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-backend-lwjgl3:$graalHelperVersion"

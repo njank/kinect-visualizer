@@ -9,6 +9,9 @@ dependencies {
   // into the "libs/" folder at the project root before building.
   compileOnly fileTree(dir: "${rootProject.projectDir}/libs", include: '*.jar')
 
+  // JNA – required by WasapiLoopbackCapture (AudioVisualizer mode)
+  implementation 'net.java.dev.jna:jna:5.14.0'
+
   if(enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-annotations:$graalHelperVersion"
   }

@@ -15,21 +15,22 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 /**
  * Application entry point and top-level orchestrator.
  *
- * <p>Five visualizer modes, selectable via the tab bar at the top of the
- * window or the number keys 1–5:
+ * <p>Six visualizer modes, selectable via the tab bar at the top of the
+ * window or the number keys 1-6:
  * <pre>
- *   1 – Camera        colour feed + 2-D skeleton overlay
- *   2 – 2D Skeleton   flat skeleton projection on a dark background
- *   3 – 3D Skeleton   metric 3-D skeleton with orbit camera
- *   4 – AR            UV-mapped 3-D point cloud coloured by the camera feed
- *   5 – Depth         depth point cloud coloured by distance (red→blue)
+ *   1 - Camera        colour feed + 2-D skeleton overlay
+ *   2 - 2D Skeleton   flat skeleton projection on a dark background
+ *   3 - 3D Skeleton   metric 3-D skeleton with orbit camera
+ *   4 - AR            UV-mapped 3-D point cloud coloured by the camera feed
+ *   5 - Depth         depth point cloud coloured by distance (red->blue)
+ *   6 - Audio         depth cloud with Z and colour intensified by system audio
  * </pre>
  *
- * <p>Modes 3–5 share {@link at.njank.kinect.OrbitCamera} controls:
- * left-drag orbit · right-drag pan · scroll zoom · R reset.
+ * <p>Modes 3-6 share {@link OrbitCamera} controls:
+ * left-drag orbit . right-drag pan . scroll zoom . R reset.
  *
- * <p>All visualizers implement {@link at.njank.kinect.Visualizer} and are stored in a single
- * array indexed by {@link at.njank.kinect.Main.Mode#ordinal()}.  Modes 3–5 are instantiated lazily
+ * <p>All visualizers implement {@link Visualizer} and are stored in a single
+ * array indexed by {@link Mode#ordinal()}.  Modes 3-6 are instantiated lazily
  * on first activation to avoid allocating GPU resources that may never be used.
  *
  * <p>Frame rate is capped to 60 FPS in {@code Lwjgl3Launcher}.
@@ -41,11 +42,11 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     // -----------------------------------------------------------------------
 
     /** Ordered list of available visualizer modes (index == tab position). */
-    private enum Mode { CAMERA, SKELETON_2D, SKELETON_3D, AR, DEPTH }
+    private enum Mode { CAMERA, SKELETON_2D, SKELETON_3D, AR, DEPTH, AUDIO }
 
-    /** Tab labels shown in the HUD – must stay in the same order as {@link at.njank.kinect.Main.Mode}. */
+    /** Tab labels shown in the HUD - must stay in the same order as {@link Mode}. */
     private static final String[] TAB_LABELS = {
-        "1  Camera", "2  2D Skeleton", "3  3D Skeleton", "4  AR", "5  Depth"
+        "1  Camera", "2  2D Skeleton", "3  3D Skeleton", "4  AR", "5  Depth", "6  Audio"
     };
 
     // -----------------------------------------------------------------------
@@ -55,7 +56,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     private KinectManager kinect;
 
     /**
-     * All visualizer instances indexed by {@link at.njank.kinect.Main.Mode#ordinal()}.
+     * All visualizer instances indexed by {@link Mode#ordinal()}.
      * Slots are null until the corresponding mode is activated for the first time.
      */
     private final Visualizer[] visualizers = new Visualizer[Mode.values().length];
@@ -82,7 +83,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     private GlyphLayout      layout;
     private InputMultiplexer inputMux;
 
-    // FPS counter – smoothed over 30 frames
+    // FPS counter - smoothed over 30 frames
     private float fpsAccum   = 0f;
     private int   fpsFrames  = 0;
     private int   fpsDisplay = 0;
@@ -174,6 +175,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             case SKELETON_3D -> new SkeletonVisualizer3D();
             case AR          -> new ARVisualizer();
             case DEPTH       -> new DepthVisualizer();
+            case AUDIO       -> new AudioVisualizer();
         };
     }
 
@@ -266,8 +268,9 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         hudFont.getData().setScale(FONT_BASE_SCALE); // restore for hint / fps text
         hudFont.setColor(0.40f, 0.40f, 0.45f, 1f);
         boolean hasOrbit = currentMode == Mode.SKELETON_3D
-                        || currentMode == Mode.AR
-                        || currentMode == Mode.DEPTH;
+            || currentMode == Mode.AR
+            || currentMode == Mode.DEPTH
+            || currentMode == Mode.AUDIO;
         if (hasOrbit) {
             hudFont.draw(hudBatch,
                 "Left-drag: orbit   Right-drag: pan   Scroll: zoom   R: reset",
@@ -278,8 +281,8 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         String fpsStr = fpsDisplay + " FPS";
         layout.setText(hudFont, fpsStr);
         Color fpsCol = fpsDisplay >= 55 ? new Color(0.3f, 1f,  0.3f,  1f)
-                     : fpsDisplay >= 30 ? new Color(1f,  0.85f, 0.2f, 1f)
-                     :                    new Color(1f,  0.3f,  0.3f, 1f);
+            : fpsDisplay >= 30 ? new Color(1f,  0.85f, 0.2f, 1f)
+            :                    new Color(1f,  0.3f,  0.3f, 1f);
         hudFont.setColor(fpsCol);
         hudFont.draw(hudBatch, fpsStr, sw - layout.width - 10, 18);
 
@@ -299,6 +302,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             case Input.Keys.NUM_3: activateMode(Mode.SKELETON_3D); return true;
             case Input.Keys.NUM_4: activateMode(Mode.AR);          return true;
             case Input.Keys.NUM_5: activateMode(Mode.DEPTH);       return true;
+            case Input.Keys.NUM_6: activateMode(Mode.AUDIO);       return true;
             case Input.Keys.R:
                 // Delegate reset to the active visualizer (no-op for 2-D modes)
                 activeVis.resetCamera();

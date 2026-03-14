@@ -5,10 +5,8 @@ import edu.ufl.digitalworlds.j4k.J4KSDK;
 import edu.ufl.digitalworlds.j4k.Skeleton;
 
 /**
- * Owns the {@link J4KSDK} instance and bridges the Kinect background threads to the
- * libGDX render thread via volatile references.
- *
- * Streams: COLOR + DEPTH + SKELETON.
+ * Owns the {@link J4KSDK} instance and bridges the Kinect background threads
+ * to the libGDX render thread via volatile references.
  */
 public class KinectManager {
 
@@ -55,8 +53,6 @@ public class KinectManager {
             @Override
             public void onDepthFrameEvent(short[] depthData, byte[] playerIndex,
                                           float[] xyz, float[] uv) {
-                // xyz: DEPTH_W*DEPTH_H*3 floats (metres, Kinect coords)
-                // uv:  DEPTH_W*DEPTH_H*2 floats (colour-image UVs, [0,1])
                 if (xyz != null) {
                     float[] xyzCopy = new float[xyz.length];
                     System.arraycopy(xyz, 0, xyzCopy, 0, xyz.length);
@@ -73,12 +69,11 @@ public class KinectManager {
 
     public void start() {
         running = sdk.start(J4KSDK.COLOR | J4KSDK.DEPTH | J4KSDK.SKELETON
-            | J4KSDK.XYZ  | J4KSDK.UV);
+            | J4KSDK.XYZ | J4KSDK.UV);
         if (!running) {
             Gdx.app.error("KinectManager",
                 "Could not open Kinect v2. " +
-                    "Ensure the Kinect for Windows Runtime v2 is installed and the " +
-                    "native DLLs are in the PATH or in the working directory.");
+                "Ensure the Kinect for Windows Runtime v2 is installed.");
         } else {
             Gdx.app.log("KinectManager", "Kinect v2 opened - streaming COLOR + DEPTH + SKELETON.");
         }
@@ -89,9 +84,9 @@ public class KinectManager {
         running = false;
     }
 
-    public Skeleton[] getSkeletons()    { return latestSkeletons;  }
-    public byte[]     getColorFrame()   { return latestColorFrame; }
-    public float[]    getDepthXYZ()     { return latestDepthXYZ;   }
-    public float[]    getDepthUV()      { return latestDepthUV;    }
-    public boolean    isRunning()       { return running;           }
+    public Skeleton[] getSkeletons()  { return latestSkeletons;  }
+    public byte[]     getColorFrame() { return latestColorFrame; }
+    public float[]    getDepthXYZ()   { return latestDepthXYZ;   }
+    public float[]    getDepthUV()    { return latestDepthUV;     }
+    public boolean    isRunning()     { return running;           }
 }
