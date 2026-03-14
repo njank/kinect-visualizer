@@ -16,21 +16,21 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
  * Application entry point and top-level orchestrator.
  *
  * <p>Six visualizer modes, selectable via the tab bar at the top of the
- * window or the number keys 1–6:
+ * window or the number keys 1-6:
  * <pre>
- *   1 – Camera        colour feed + 2-D skeleton overlay
- *   2 – 2D Skeleton   flat skeleton projection on a dark background
- *   3 – 3D Skeleton   metric 3-D skeleton with orbit camera
- *   4 – AR            UV-mapped 3-D point cloud coloured by the camera feed
- *   5 – Depth         depth point cloud coloured by distance (red→blue)
- *   6 – Audio         depth cloud with Z and colour intensified by system audio
+ *   1 - Camera        colour feed + 2-D skeleton overlay
+ *   2 - 2D Skeleton   flat skeleton projection on a dark background
+ *   3 - 3D Skeleton   metric 3-D skeleton with orbit camera
+ *   4 - AR            UV-mapped 3-D point cloud coloured by the camera feed
+ *   5 - Depth         depth point cloud coloured by distance (red->blue)
+ *   6 - Audio         depth cloud with Z and colour intensified by system audio
  * </pre>
  *
- * <p>Modes 3–6 share {@link OrbitCamera} controls:
- * left-drag orbit · right-drag pan · scroll zoom · R reset.
+ * <p>Modes 3-6 share {@link OrbitCamera} controls:
+ * left-drag orbit . right-drag pan . scroll zoom . R reset.
  *
  * <p>All visualizers implement {@link Visualizer} and are stored in a single
- * array indexed by {@link Mode#ordinal()}.  Modes 3–6 are instantiated lazily
+ * array indexed by {@link Mode#ordinal()}.  Modes 3-6 are instantiated lazily
  * on first activation to avoid allocating GPU resources that may never be used.
  *
  * <p>Frame rate is capped to 60 FPS in {@code Lwjgl3Launcher}.
@@ -44,7 +44,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     /** Ordered list of available visualizer modes (index == tab position). */
     private enum Mode { CAMERA, SKELETON_2D, SKELETON_3D, AR, DEPTH, AUDIO }
 
-    /** Tab labels shown in the HUD – must stay in the same order as {@link Mode}. */
+    /** Tab labels shown in the HUD - must stay in the same order as {@link Mode}. */
     private static final String[] TAB_LABELS = {
         "1  Camera", "2  2D Skeleton", "3  3D Skeleton", "4  AR", "5  Depth", "6  Audio"
     };
@@ -83,7 +83,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     private GlyphLayout      layout;
     private InputMultiplexer inputMux;
 
-    // FPS counter – smoothed over 30 frames
+    // FPS counter - smoothed over 30 frames
     private float fpsAccum   = 0f;
     private int   fpsFrames  = 0;
     private int   fpsDisplay = 0;
