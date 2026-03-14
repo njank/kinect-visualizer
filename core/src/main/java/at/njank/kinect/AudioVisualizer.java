@@ -8,8 +8,12 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import edu.ufl.digitalworlds.j4k.Skeleton;
 
 import java.nio.ByteBuffer;
@@ -227,8 +231,15 @@ public class AudioVisualizer implements Visualizer {
     private float[]       vertices;
     private ShaderProgram uvShader;
 
-    /** 2-D skeleton overlay, shared with the other 3-D modes. */
-    private SkeletonVisualizer2D skeletonOverlay;
+    /** ShapeRenderer for 3-D skeleton bones (world-space lines) and billboard joints. */
+    private ShapeRenderer sr;
+    /** Ortho matrix kept in sync with window size for billboard joint circles. */
+    private final Matrix4  screenOrtho = new Matrix4();
+    /** Reusable joint world-space vectors — avoids per-frame allocation. */
+    private final Vector3  tmpA        = new Vector3();
+    private final Vector3  tmpB        = new Vector3();
+    /** Screen-space radius of the joint billboard circles (pixels). */
+    private static final float JOINT_RADIUS = 9f;
 
     // -----------------------------------------------------------------------
     //  Camera  (same defaults as ARVisualizer)
@@ -272,6 +283,9 @@ public class AudioVisualizer implements Visualizer {
     private float[] lastXYZ;
     private float[] lastUV;
 
+    /** Whether to draw the skeleton overlay.  Toggled by the S key (default off). */
+    private boolean skeletonEnabled = false;
+
     // -----------------------------------------------------------------------
     //  Lifecycle
     // -----------------------------------------------------------------------
@@ -295,7 +309,8 @@ public class AudioVisualizer implements Visualizer {
             new VertexAttribute(VertexAttributes.Usage.Generic,            1, "a_tintWeight"));
 
         buildShader();
-        skeletonOverlay = new SkeletonVisualizer2D();
+        sr = new ShapeRenderer();
+        screenOrtho.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         orbit.init(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0.01f, 50f);
 
         // Audio - start WASAPI loopback; gracefully continues without it
@@ -355,34 +370,31 @@ public class AudioVisualizer implements Visualizer {
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         }
 
-        // 2-D skeleton overlay (same as ARVisualizer)
-        Skeleton[] skeletons = kinect.getSkeletons();
-        if (skeletons != null) {
-            float sw = Gdx.graphics.getWidth();
-            float sh = Gdx.graphics.getHeight();
-            Gdx.gl.glEnable(GL20.GL_BLEND);
-            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-            skeletonOverlay.setProjection(sw, sh);
-            skeletonOverlay.renderOverlay(skeletons, sw, sh);
-            Gdx.gl.glDisable(GL20.GL_BLEND);
-        }
+        // Skeleton drawn in the same audio-displaced 3-D world space as the point cloud
+        if (skeletonEnabled) draw3DSkeleton(kinect.getSkeletons(), bandValues);
     }
 
     @Override
     public void resize(int w, int h) {
         orbit.resize(w, h);
-        if (skeletonOverlay != null) skeletonOverlay.resize(w, h);
+        screenOrtho.setToOrtho2D(0, 0, w, h);
     }
 
     @Override
     public void dispose() {
-        if (audio           != null) audio.stop();
-        if (bgTexture       != null) bgTexture.dispose();
-        if (bgPixmap        != null) bgPixmap.dispose();
-        if (uvMesh          != null) uvMesh.dispose();
-        if (uvShader        != null) uvShader.dispose();
-        if (skeletonOverlay != null) skeletonOverlay.dispose();
+        if (audio     != null) audio.stop();
+        if (bgTexture != null) bgTexture.dispose();
+        if (bgPixmap  != null) bgPixmap.dispose();
+        if (uvMesh    != null) uvMesh.dispose();
+        if (uvShader  != null) uvShader.dispose();
+        if (sr        != null) sr.dispose();
     }
+
+    @Override
+    public void setSkeletonEnabled(boolean enabled) { skeletonEnabled = enabled; }
+
+    @Override
+    public boolean isSkeletonEnabled() { return skeletonEnabled; }
 
     @Override
     public InputProcessor getInputProcessor() { return orbit.getInputProcessor(); }
@@ -641,4 +653,136 @@ public class AudioVisualizer implements Visualizer {
         buf.rewind();
         bgTexture.draw(bgPixmap, 0, 0);
     }
+
+    // -----------------------------------------------------------------------
+    //  3-D skeleton overlay (audio-displaced)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Renders skeleton bones and joints in the same audio-displaced 3-D world
+     * space as the point cloud, so the skeleton tracks the person exactly at
+     * every camera angle.
+     *
+     * <p>Each joint's Z position is displaced by the <em>same push formula</em>
+     * used in {@link #fillVertices}: the joint's depth pixel is looked up in
+     * {@link #pixelBand}, the corresponding band value is read, and then:
+     * <pre>
+     *   depthScale = (1 - t) ^ DEPTH_SCALE_CURVE
+     *   push       = band ^ PUSH_CURVE x MAX_PUSH x depthScale
+     *   worldZ     = -kinectZ + push
+     * </pre>
+     * This keeps the skeleton rigidly attached to the point cloud surface —
+     * joints protrude in perfect sync with the surrounding pixels.
+     *
+     * <p>Bones are drawn as 3-D lines (world-space projection).  Joints are
+     * projected through the orbit camera into screen space and drawn as
+     * billboard circles so they are always legible regardless of view angle.
+     *
+     * @param bandValues current FFT magnitudes [0..1], or {@code null} when
+     *                   audio is unavailable (skeleton rendered without push)
+     */
+    private void draw3DSkeleton(Skeleton[] skeletons, float[] bandValues) {
+        if (skeletons == null) return;
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+
+        // ── Bones: 3-D lines in audio-displaced world space ──
+        sr.setProjectionMatrix(orbit.getCamera().combined);
+        sr.begin(ShapeRenderer.ShapeType.Line);
+        for (int s = 0; s < skeletons.length; s++) {
+            Skeleton sk = skeletons[s];
+            if (sk == null) continue;
+            Color col = SKELETON_COLORS[s % SKELETON_COLORS.length];
+            sr.setColor(col.r, col.g, col.b, 0.9f);
+            for (int[] bone : BONES) {
+                if (!has3D(sk, bone[0]) || !has3D(sk, bone[1])) continue;
+                toWorldAudio(sk, bone[0], tmpA, bandValues);
+                toWorldAudio(sk, bone[1], tmpB, bandValues);
+                sr.line(tmpA, tmpB);
+            }
+        }
+        sr.end();
+
+        // ── Joints: project to screen, draw billboard circles ──
+        sr.setProjectionMatrix(screenOrtho);
+        sr.begin(ShapeRenderer.ShapeType.Filled);
+        for (int s = 0; s < skeletons.length; s++) {
+            Skeleton sk = skeletons[s];
+            if (sk == null) continue;
+            Color col = SKELETON_COLORS[s % SKELETON_COLORS.length];
+            for (int j = 0; j < JOINT_COUNT; j++) {
+                if (!has3D(sk, j)) continue;
+                toWorldAudio(sk, j, tmpA, bandValues);
+                orbit.getCamera().project(tmpA);
+                if (tmpA.z > 1f) continue; // behind camera or past far clip
+                sr.setColor(col.r * 0.3f, col.g * 0.3f, col.b * 0.3f, 1f);
+                sr.circle(tmpA.x, tmpA.y, JOINT_RADIUS + 3f);
+                sr.setColor(col.r, col.g, col.b, 1f);
+                sr.circle(tmpA.x, tmpA.y, JOINT_RADIUS);
+            }
+        }
+        sr.end();
+
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Joint helpers
+    // -----------------------------------------------------------------------
+
+    /** Returns {@code true} if the joint has a non-zero 3-D position. */
+    private static boolean has3D(Skeleton sk, int j) {
+        double[] p = sk.get3DJoint(j);
+        return p[0] != 0.0 || p[1] != 0.0 || p[2] != 0.0;
+    }
+
+    /**
+     * Converts a joint to world space with the <em>same</em> audio Z
+     * displacement applied to the depth-cloud pixels at that position.
+     *
+     * <p>Steps:
+     * <ol>
+     *   <li>Get metric joint position; negate Kinect Z (sensor convention).</li>
+     *   <li>Find the depth-image pixel for this joint via
+     *       {@code get2DJoint(j, DEPTH_W, DEPTH_H)}.</li>
+     *   <li>Look up its pre-computed band index in {@link #pixelBand}.</li>
+     *   <li>Apply the identical push formula from {@link #fillVertices}:
+     *       <pre>
+     *         t          = clamp((kinectZ - DEPTH_NEAR) / (DEPTH_FAR - DEPTH_NEAR), 0, 1)
+     *         depthScale = (1 - t) ^ DEPTH_SCALE_CURVE
+     *         push       = band ^ PUSH_CURVE x MAX_PUSH x depthScale
+     *         worldZ     = -kinectZ + push
+     *       </pre>
+     *   </li>
+     * </ol>
+     *
+     * @param bandValues current FFT magnitudes, or {@code null} for no push
+     */
+    private void toWorldAudio(Skeleton sk, int j, Vector3 out, float[] bandValues) {
+        double[] p      = sk.get3DJoint(j);
+        float    jx     = (float) p[0];
+        float    jy     = (float) p[1];
+        float    kinectZ = (float) p[2]; // Kinect: positive Z toward sensor
+
+        float push = 0f;
+        if (bandValues != null) {
+            // Find the depth pixel for this joint and look up its band
+            int[] dp = sk.get2DJoint(j, DEPTH_W, DEPTH_H);
+            int   dx = dp[0];
+            int   dy = dp[1];
+            if (dx >= 0 && dx < DEPTH_W && dy >= 0 && dy < DEPTH_H) {
+                float bandVal = bandValues[pixelBand[dy * DEPTH_W + dx]];
+                // Depth-based impact scale — identical to fillVertices step 2
+                float t = MathUtils.clamp(
+                    (kinectZ - DEPTH_NEAR) / (DEPTH_FAR - DEPTH_NEAR), 0f, 1f);
+                float depthScale = (float) Math.pow(1f - t, DEPTH_SCALE_CURVE);
+                // Z protrusion — identical to fillVertices step 3
+                push = (float) Math.pow(bandVal, PUSH_CURVE) * MAX_PUSH * depthScale;
+            }
+        }
+
+        out.set(jx, jy, -kinectZ + push);
+    }
+
 }
