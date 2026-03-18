@@ -19,7 +19,7 @@ import static at.njank.kinect.KinectManager.DEPTH_W;
 import static at.njank.kinect.SkeletonConstants.*;
 
 /**
- * Visualizer mode 5 – "Depth".
+ * Visualizer mode 5 - "Depth".
  *
  * <p>Renders every Kinect v2 depth pixel as a coloured 3-D point, graded
  * red (near) → green → blue (far) by metric Z distance.
@@ -234,7 +234,7 @@ public class DepthVisualizer implements Visualizer {
 
     /**
      * Packs (x, y, −z, r, g, b, a) per pixel.
-     * Colour is graded red → green → blue over 0.5 m – 5.0 m.
+     * Colour is graded red → green → blue over 0.5 m - 5.0 m.
      * Pixels with z ≤ 0 get alpha = 0 and are discarded by the shader.
      */
     private void fillVertices(float[] xyz) {

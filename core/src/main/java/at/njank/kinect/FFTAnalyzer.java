@@ -53,7 +53,7 @@ package at.njank.kinect;
  *
  *  PERCEPTUAL_BOOST         Extra dB per band index (treble tilt compensation).
  *                           0.0 = raw FFT. 0.4 = gentle. 0.8 = strong lift.
- *                           With AGC active, keep this modest (0.3–0.5) since
+ *                           With AGC active, keep this modest (0.3-0.5) since
  *                           AGC already self-balances each band.
  * </pre>
  */
@@ -79,7 +79,7 @@ public class FFTAnalyzer {
      *
      * <pre>
      *  0.999 = very slow (~10 s to halve) — smooth, song-level adaptation
-     *  0.997 = recommended (~3–4 s)
+     *  0.997 = recommended (~3-4 s)
      *  0.990 = fast (~1 s), chases loud hits quickly
      * </pre>
      */

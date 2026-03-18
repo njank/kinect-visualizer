@@ -16,15 +16,15 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
  * Application entry point and top-level orchestrator.
  *
  * <p>Four visualizer modes, selectable via the tab bar at the top of the
- * window or the number keys 1–4:
+ * window or the number keys 1-4:
  * <pre>
- *   1 – Camera   colour feed with optional 2-D skeleton overlay
- *   2 – AR       UV-mapped 3-D point cloud coloured by the camera feed
- *   3 – Depth    depth point cloud coloured by distance (red→blue)
- *   4 – Audio    depth cloud with Z and colour intensified by system audio
+ *   1 - Camera   colour feed with optional 2-D skeleton overlay
+ *   2 - AR       UV-mapped 3-D point cloud coloured by the camera feed
+ *   3 - Depth    depth point cloud coloured by distance (red→blue)
+ *   4 - Audio    depth cloud with Z and colour intensified by system audio
  * </pre>
  *
- * <p>Modes 2–4 share {@link OrbitCamera} controls:
+ * <p>Modes 2-4 share {@link OrbitCamera} controls:
  * left-drag orbit · right-drag pan · scroll zoom · R reset.
  *
  * <p>Press {@code S} in any mode to toggle the skeleton overlay on/off.
@@ -45,7 +45,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     /** Ordered list of available visualizer modes (index == tab position). */
     private enum Mode { CAMERA, AR, DEPTH, AUDIO }
 
-    /** Tab labels shown in the HUD – must stay in the same order as {@link Mode}. */
+    /** Tab labels shown in the HUD - must stay in the same order as {@link Mode}. */
     private static final String[] TAB_LABELS = {
         "1  Camera", "2  AR", "3  Depth", "4  Audio"
     };
@@ -84,7 +84,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     private GlyphLayout      layout;
     private InputMultiplexer inputMux;
 
-    // FPS counter – smoothed over 30 frames
+    // FPS counter - smoothed over 30 frames
     private float fpsAccum   = 0f;
     private int   fpsFrames  = 0;
     private int   fpsDisplay = 0;

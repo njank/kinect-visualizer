@@ -140,11 +140,11 @@ public class AudioVisualizer implements Visualizer {
      *  0.5   │   55 %    71 %    84 %    95 %   100 %   │ expands quiet (classical/ambient)
      *
      * Recommended ranges by genre:
-     *   Pop / EDM (heavily compressed):  2.0 – 4.0
-     *   Rock / Hip-hop:                  3.0 – 6.0
-     *   Classical / Jazz (wide dynamics): 1.0 – 2.0
-     *   "Only peaks matter" look:        8.0 – 15.0
-     *   Extreme spike-only aesthetics:   20.0 – 30.0
+     *   Pop / EDM (heavily compressed):  2.0 - 4.0
+     *   Rock / Hip-hop:                  3.0 - 6.0
+     *   Classical / Jazz (wide dynamics): 1.0 - 2.0
+     *   "Only peaks matter" look:        8.0 - 15.0
+     *   Extreme spike-only aesthetics:   20.0 - 30.0
      */
     private static final float PUSH_CURVE  = 15.0f;
 
