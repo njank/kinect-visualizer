@@ -148,8 +148,8 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     // -----------------------------------------------------------------------
 
     private void activateMode(Mode mode) {
-        currentMode  = mode;
-        int idx      = mode.ordinal();
+        currentMode = mode;
+        int idx     = mode.ordinal();
 
         // Lazy-init: create the visualizer on first use
         if (visualizers[idx] == null) {
@@ -190,7 +190,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         // --- Compute a scale so all tabs always fit the window width ---
         // First measure at base scale to find the natural total width.
         hudFont.getData().setScale(FONT_BASE_SCALE);
-        float[] tabW  = new float[TAB_LABELS.length];
+        float[] tabW   = new float[TAB_LABELS.length];
         float   totalW = 0;
         for (int i = 0; i < TAB_LABELS.length; i++) {
             layout.setText(hudFont, TAB_LABELS[i]);
@@ -249,7 +249,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         }
         hudShape.end();
 
-        // --- Tab labels + HUD text ---
+        // --- Tab labels + HUD hints ---
         hudBatch.begin();
 
         x = startX;
@@ -272,9 +272,17 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             || currentMode == Mode.DEPTH
             || currentMode == Mode.AUDIO;
         if (hasOrbit) {
+            // Two lines: orbit on top, skeleton below
+            hudFont.setColor(0.40f, 0.40f, 0.45f, 1f);
             hudFont.draw(hudBatch,
-                "Left-drag: orbit   Right-drag: pan   Scroll: zoom   R: reset",
+                "Left-drag: orbit   Right-drag: pan   Scroll: zoom   R: reset   " + skelHint,
                 10, 18);
+        } else {
+            // Camera mode: just show skeleton toggle
+            hudFont.setColor(skelOn
+                ? new Color(0.55f, 0.90f, 0.55f, 1f)   // green tint when on
+                : new Color(0.40f, 0.40f, 0.45f, 1f));  // dim when off
+            hudFont.draw(hudBatch, skelHint, 10, 18);
         }
 
         // FPS counter (bottom-right), colour-coded green/yellow/red
@@ -304,7 +312,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             case Input.Keys.NUM_5: activateMode(Mode.DEPTH);       return true;
             case Input.Keys.NUM_6: activateMode(Mode.AUDIO);       return true;
             case Input.Keys.R:
-                // Delegate reset to the active visualizer (no-op for 2-D modes)
+                // Delegate camera reset to the active visualizer (no-op for Camera mode)
                 activeVis.resetCamera();
                 return true;
             case Input.Keys.ESCAPE:
@@ -326,7 +334,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
 
         // Re-measure tabs with current font scale to get accurate hit boxes
         hudFont.getData().setScale(FONT_BASE_SCALE);
-        float[] tabW  = new float[TAB_LABELS.length];
+        float[] tabW   = new float[TAB_LABELS.length];
         float   totalW = 0;
         for (int i = 0; i < TAB_LABELS.length; i++) {
             layout.setText(hudFont, TAB_LABELS[i]);

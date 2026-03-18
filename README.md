@@ -72,7 +72,7 @@ kinect/
 
 ### Visualizer interface
 
-All five modes implement `Visualizer`:
+All four modes implement `Visualizer`:
 
 ```java
 public interface Visualizer {
@@ -85,11 +85,9 @@ public interface Visualizer {
 }
 ```
 
-Modes 3–5 are instantiated **lazily** – no GPU memory is allocated until the user first switches to that mode.
-
 ### KinectManager
 
-`KinectManager` wraps the J4K `J4KSDK` and exposes three volatile data streams that the render thread reads safely without locking:
+`KinectManager` wraps the J4K `J4KSDK` and exposes four volatile data streams that the render thread reads safely without locking:
 
 | Accessor | Content |
 |----------|---------|
@@ -126,7 +124,6 @@ It polls `Gdx.input` **every frame** (rather than using event callbacks) to ensu
 **"Could not open Kinect v2"**
 - Confirm the Kinect for Windows Runtime v2 is installed.
 - Make sure the sensor is plugged into a USB 3.0 port.
-- Only one application can own the sensor at a time; close any other Kinect apps.
 
 **Skeleton not visible in Camera mode**  
 The skeleton overlay uses depth-space joint projections.  The person must be within the Kinect's tracking range (~0.5 m – 4.5 m) and facing the sensor.

@@ -2,6 +2,7 @@ package at.njank.kinect;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputProcessor;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -9,6 +10,9 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import edu.ufl.digitalworlds.j4k.Skeleton;
 
 import java.nio.ByteBuffer;
@@ -21,16 +25,26 @@ import static at.njank.kinect.SkeletonConstants.*;
  * Visualizer mode 4 – "AR" (Augmented Reality).
  *
  * <p>Renders the Kinect v2 colour stream as a UV-mapped 3-D point cloud:
- * every depth pixel is placed at its metric (x, y, z) position in world
- * space and coloured with the corresponding colour-image texel, producing a
- * navigable 3-D reconstruction of the scene.
+ * every depth pixel is placed at its metric (x, y, z) world position and
+ * coloured with the corresponding colour-image texel.
  *
- * <p>Camera controls are handled by {@link at.njank.kinect.OrbitCamera}.
+ * <h3>Skeleton alignment</h3>
+ * The skeleton is rendered <em>in 3-D world space</em> using the same orbit
+ * camera as the point cloud.  Bones are drawn as 3-D lines; joints are
+ * projected through the camera matrix and drawn as billboard circles in
+ * screen space.  This keeps the skeleton locked to the cloud at every zoom,
+ * pan, and orbit angle.
+ *
+ * <p>Camera controls are handled by {@link OrbitCamera}.
  */
 public class ARVisualizer implements Visualizer {
 
-    private static final int POINT_COUNT      = DEPTH_W * DEPTH_H;
+    private static final int POINT_COUNT       = DEPTH_W * DEPTH_H;
     private static final int FLOATS_PER_VERTEX = 5; // x y z  u v
+
+    // Joint and bone visual sizes
+    private static final float JOINT_RADIUS    = 9f;   // screen-space pixels
+    private static final float BONE_WIDTH      = 0.012f; // world-space metres
 
     // -----------------------------------------------------------------------
     // GPU resources
@@ -43,17 +57,18 @@ public class ARVisualizer implements Visualizer {
     private float[]       vertices;
     private ShaderProgram uvShader;
 
-    private SkeletonVisualizer2D skeletonOverlay;
+    private ShapeRenderer sr;
+    /** Ortho matrix kept in sync with window size for billboard joint circles. */
+    private final Matrix4 screenOrtho = new Matrix4();
+
+    // Reusable vectors — avoids per-frame allocation
+    private final Vector3 tmpA = new Vector3();
+    private final Vector3 tmpB = new Vector3();
 
     // -----------------------------------------------------------------------
     // Camera
     // -----------------------------------------------------------------------
 
-    // yaw=0    → camera on +Z side, front-facing
-    // pitch=-10 → gentle downward tilt
-    // zoom=2   → close enough to fill the frame
-    // panY=0.3 → look-target at roughly chest height
-    // lookAtZ=-2 → scene centred at z≈−2 in world space
     private final OrbitCamera orbit =
         new OrbitCamera(0f, -10f, 2.0f, 0f, 0.3f, -2f);
 
@@ -65,8 +80,11 @@ public class ARVisualizer implements Visualizer {
     private float[] lastXYZ;
     private float[] lastUV;
 
+    /** Whether to draw the skeleton overlay.  Toggled by the S key (default off). */
+    private boolean skeletonEnabled = false;
+
     // -----------------------------------------------------------------------
-    // Lazy init
+    // Lifecycle
     // -----------------------------------------------------------------------
 
     @Override
@@ -86,7 +104,10 @@ public class ARVisualizer implements Visualizer {
             new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, "a_texCoord0"));
 
         buildUvShader();
-        skeletonOverlay = new SkeletonVisualizer2D();
+
+        sr = new ShapeRenderer();
+        screenOrtho.setToOrtho2D(0, 0, w, h);
+
         orbit.init(w, h, 0.01f, 50f);
     }
 
@@ -126,39 +147,113 @@ public class ARVisualizer implements Visualizer {
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         }
 
-        Skeleton[] skeletons = kinect.getSkeletons();
-        if (skeletons != null) {
-            float sw = Gdx.graphics.getWidth();
-            float sh = Gdx.graphics.getHeight();
-            Gdx.gl.glEnable(GL20.GL_BLEND);
-            Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-            skeletonOverlay.setProjection(sw, sh);
-            skeletonOverlay.renderOverlay(skeletons, sw, sh);
-            Gdx.gl.glDisable(GL20.GL_BLEND);
-        }
+        // Skeleton drawn in 3-D world space so it tracks the point cloud
+        if (skeletonEnabled) draw3DSkeleton(kinect.getSkeletons());
     }
 
     @Override
     public void resize(int w, int h) {
         orbit.resize(w, h);
-        if (skeletonOverlay != null) skeletonOverlay.resize(w, h);
+        screenOrtho.setToOrtho2D(0, 0, w, h);
     }
 
     @Override
     public void dispose() {
-        if (bgTexture       != null) bgTexture.dispose();
-        if (bgPixmap        != null) bgPixmap.dispose();
-        if (uvMesh          != null) uvMesh.dispose();
-        if (uvShader        != null) uvShader.dispose();
-        if (skeletonOverlay != null) skeletonOverlay.dispose();
+        if (bgTexture != null) bgTexture.dispose();
+        if (bgPixmap  != null) bgPixmap.dispose();
+        if (uvMesh    != null) uvMesh.dispose();
+        if (uvShader  != null) uvShader.dispose();
+        if (sr        != null) sr.dispose();
     }
+
+    @Override
+    public void setSkeletonEnabled(boolean enabled) { skeletonEnabled = enabled; }
+
+    @Override
+    public boolean isSkeletonEnabled() { return skeletonEnabled; }
 
     @Override
     public InputProcessor getInputProcessor() { return orbit.getInputProcessor(); }
 
-    /** Called by Main when the user presses R in AR mode. */
     @Override
     public void resetCamera() { orbit.reset(); }
+
+    // -----------------------------------------------------------------------
+    // 3-D skeleton overlay
+    // -----------------------------------------------------------------------
+
+    /**
+     * Renders skeleton joints and bones in 3-D world space using the same
+     * orbit camera as the point cloud, so the skeleton tracks the cloud at
+     * every zoom, pan, and orbit angle.
+     *
+     * <p>Bones are drawn as 3-D lines.  Joints are projected through the
+     * camera matrix and drawn as billboard circles in screen space.
+     */
+    private void draw3DSkeleton(Skeleton[] skeletons) {
+        if (skeletons == null) return;
+
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+
+        // ── Bones: 3-D lines in world space ──
+        sr.setProjectionMatrix(orbit.getCamera().combined);
+        sr.begin(ShapeRenderer.ShapeType.Line);
+        for (int s = 0; s < skeletons.length; s++) {
+            Skeleton sk = skeletons[s];
+            if (sk == null) continue;
+            Color col = SKELETON_COLORS[s % SKELETON_COLORS.length];
+            sr.setColor(col.r, col.g, col.b, 0.9f);
+            for (int[] bone : BONES) {
+                if (!has3D(sk, bone[0]) || !has3D(sk, bone[1])) continue;
+                toWorld(sk, bone[0], tmpA);
+                toWorld(sk, bone[1], tmpB);
+                sr.line(tmpA, tmpB);
+            }
+        }
+        sr.end();
+
+        // ── Joints: project to screen, draw billboard circles ──
+        sr.setProjectionMatrix(screenOrtho);
+        sr.begin(ShapeRenderer.ShapeType.Filled);
+        for (int s = 0; s < skeletons.length; s++) {
+            Skeleton sk = skeletons[s];
+            if (sk == null) continue;
+            Color col = SKELETON_COLORS[s % SKELETON_COLORS.length];
+            for (int j = 0; j < JOINT_COUNT; j++) {
+                if (!has3D(sk, j)) continue;
+                toWorld(sk, j, tmpA);
+                orbit.getCamera().project(tmpA);
+                if (tmpA.z > 1f) continue; // behind camera or past far clip
+                sr.setColor(col.r * 0.3f, col.g * 0.3f, col.b * 0.3f, 1f);
+                sr.circle(tmpA.x, tmpA.y, JOINT_RADIUS + 3f);
+                sr.setColor(col.r, col.g, col.b, 1f);
+                sr.circle(tmpA.x, tmpA.y, JOINT_RADIUS);
+            }
+        }
+        sr.end();
+
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    // -----------------------------------------------------------------------
+    // Joint helpers
+    // -----------------------------------------------------------------------
+
+    /** Returns {@code true} if the joint has a non-zero 3-D position. */
+    private static boolean has3D(Skeleton sk, int j) {
+        double[] p = sk.get3DJoint(j);
+        return p[0] != 0.0 || p[1] != 0.0 || p[2] != 0.0;
+    }
+
+    /**
+     * Copies a joint into world space, negating Z so the scene appears in
+     * front of the camera (Kinect +Z points toward the sensor).
+     */
+    private static void toWorld(Skeleton sk, int j, Vector3 out) {
+        double[] p = sk.get3DJoint(j);
+        out.set((float) p[0], (float) p[1], -(float) p[2]);
+    }
 
     // -----------------------------------------------------------------------
     // Point-cloud geometry
@@ -215,7 +310,7 @@ public class ARVisualizer implements Visualizer {
     }
 
     // -----------------------------------------------------------------------
-    // Colour-frame upload
+    // Colour-frame upload (BGRA → RGBA)
     // -----------------------------------------------------------------------
 
     private void uploadBgra(byte[] bgra) {
