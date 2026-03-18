@@ -15,10 +15,10 @@ import com.badlogic.gdx.math.Vector3;
  * <p>Controls (polling-based, called once per frame from the visualizer's
  * {@code render()} method via {@link #handleInput()}):
  * <ul>
- *   <li>Left-drag  – orbit (yaw / pitch)</li>
- *   <li>Right-drag – pan</li>
- *   <li>Scroll     – zoom</li>
- *   <li>R          – reset to constructor defaults</li>
+ *   <li>Left-drag  - orbit (yaw / pitch)</li>
+ *   <li>Right-drag - pan</li>
+ *   <li>Scroll     - zoom</li>
+ *   <li>R          - reset to constructor defaults</li>
  * </ul>
  *
  * <p>Callers should:

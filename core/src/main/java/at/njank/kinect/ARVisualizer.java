@@ -22,7 +22,7 @@ import static at.njank.kinect.KinectManager.DEPTH_W;
 import static at.njank.kinect.SkeletonConstants.*;
 
 /**
- * Visualizer mode 4 – "AR" (Augmented Reality).
+ * Visualizer mode 4 - "AR" (Augmented Reality).
  *
  * <p>Renders the Kinect v2 colour stream as a UV-mapped 3-D point cloud:
  * every depth pixel is placed at its metric (x, y, z) world position and

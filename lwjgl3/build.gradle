@@ -33,10 +33,10 @@ dependencies {
   implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
   implementation project(':core')
 
-  // J4K (Java for Kinect) – ufdw.jar must be placed in the libs/ folder.
+  // J4K (Java for Kinect) - ufdw.jar must be placed in the libs/ folder.
   implementation fileTree(dir: "${rootProject.projectDir}/libs", include: '*.jar')
 
-  // JNA – required by WasapiLoopbackCapture (AudioVisualizer mode)
+  // JNA - required by WasapiLoopbackCapture (AudioVisualizer mode)
   implementation 'net.java.dev.jna:jna:5.14.0'
 
   if(enableGraalNative == 'true') {

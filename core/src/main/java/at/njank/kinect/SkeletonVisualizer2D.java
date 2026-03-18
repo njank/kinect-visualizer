@@ -10,7 +10,7 @@ import edu.ufl.digitalworlds.j4k.Skeleton;
 import static at.njank.kinect.SkeletonConstants.*;
 
 /**
- * Visualizer mode 2 – "2D Skeleton".
+ * Visualizer mode 2 - "2D Skeleton".
  *
  * <p>Renders every tracked skeleton as coloured joints and bones projected
  * onto the depth-sensor image plane.  Joint positions come from J4K's
@@ -60,7 +60,7 @@ public class SkeletonVisualizer2D implements Visualizer {
                 sr.rectLine(a[0], h - a[1], b[0], h - b[1], BONE_THICKNESS);
             }
 
-            // Joints – dark halo + bright fill
+            // Joints - dark halo + bright fill
             for (int j = 0; j < JOINT_COUNT; j++) {
                 if (!visible(sk, j, (int) w, (int) h)) continue;
                 int[] p = sk.get2DJoint(j, (int) w, (int) h);
@@ -94,7 +94,7 @@ public class SkeletonVisualizer2D implements Visualizer {
 
     /**
      * Draws the skeleton overlay into the currently active frame.
-     * Does not clear the screen – intended to be called after the caller's
+     * Does not clear the screen - intended to be called after the caller's
      * own scene has been rendered.
      *
      * @param skeletons array from {@link at.njank.kinect.KinectManager#getSkeletons()} (may be null)

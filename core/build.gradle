@@ -4,12 +4,12 @@ eclipse.project.name = appName + '-core'
 dependencies {
   api "com.badlogicgames.gdx:gdx:$gdxVersion"
 
-  // J4K (Java for Kinect) library – distributed as a local JAR.
+  // J4K (Java for Kinect) library - distributed as a local JAR.
   // Place ufdw.jar (downloaded from https://abarmpou.github.io/ufdw/j4k/)
   // into the "libs/" folder at the project root before building.
   compileOnly fileTree(dir: "${rootProject.projectDir}/libs", include: '*.jar')
 
-  // JNA – required by WasapiLoopbackCapture (AudioVisualizer mode)
+  // JNA - required by WasapiLoopbackCapture (AudioVisualizer mode)
   implementation 'net.java.dev.jna:jna:5.14.0'
 
   if(enableGraalNative == 'true') {

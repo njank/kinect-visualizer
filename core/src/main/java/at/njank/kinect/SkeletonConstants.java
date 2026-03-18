@@ -5,8 +5,8 @@ import edu.ufl.digitalworlds.j4k.Skeleton;
 
 /**
  * Shared constants used by every visualizer:
- *  – bone topology (pairs of Kinect v2 joint indices)
- *  – one colour per skeleton slot (Kinect v2 tracks up to 6 bodies)
+ *  - bone topology (pairs of Kinect v2 joint indices)
+ *  - one colour per skeleton slot (Kinect v2 tracks up to 6 bodies)
  */
 public final class SkeletonConstants {
 

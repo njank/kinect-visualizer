@@ -16,7 +16,7 @@ import edu.ufl.digitalworlds.j4k.Skeleton;
 import static at.njank.kinect.SkeletonConstants.*;
 
 /**
- * Visualizer mode 3 – "3D Skeleton".
+ * Visualizer mode 3 - "3D Skeleton".
  *
  * <p>Renders skeletons using the Kinect v2 metric 3-D joint positions.
  * Joints are drawn as lit spheres via libGDX's {@code ModelBatch}; bones are
