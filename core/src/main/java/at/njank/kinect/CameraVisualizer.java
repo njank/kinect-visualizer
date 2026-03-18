@@ -19,7 +19,7 @@ import static at.njank.kinect.KinectManager.DEPTH_W;
 import static at.njank.kinect.SkeletonConstants.*;
 
 /**
- * Visualizer mode 1 – "Camera".
+ * Visualizer mode 1 - "Camera".
  *
  * <p>Streams the Kinect v2 colour image (1920 × 1080, BGRA) into a GPU
  * texture and composites a 2-D skeleton overlay on top.
