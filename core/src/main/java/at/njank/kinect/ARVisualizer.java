@@ -34,16 +34,21 @@ import static at.njank.kinect.SkeletonConstants.*;
  * <ul>
  *   <li><b>NONE</b> - pure AR: camera texture on point cloud, no extra overlay.</li>
  *   <li><b>AUDIO</b> - spectral tint from system audio layered over the camera
- *       colour (uses the same FFT pipeline as {@link AudioVisualizer} but without
- *       Z displacement so the cloud geometry stays stable).</li>
- *   <li><b>SCREEN_ADD</b> - Linear Dodge (Add): screen adds luminance to the AR
- *       cloud (GL_FUNC_ADD, src x alpha + dst).</li>
- *   <li><b>SCREEN_SUBTRACT</b> - Subtract: screen subtracts luminance from the
- *       cloud (GL_FUNC_REVERSE_SUBTRACT, dst - src x alpha).</li>
+ *       colour, plus Z displacement that protrudes depth pixels toward the
+ *       viewer in sync with the audio. Frequency bands map radially from the
+ *       depth image centre (same formula as AudioVisualizer).</li>
+ *   <li><b>LINEAR_DODGE</b> - Linear Dodge (Add): adds the screen pixel values
+ *       to the base layer. Black areas of the screen cause no change; lighter
+ *       areas push the result toward white. Formula: result = base + screen * alpha.
+ *       GL: GL_FUNC_ADD, srcFactor=SRC_ALPHA, dstFactor=ONE.</li>
+ *   <li><b>SUBTRACT</b> - Subtract: subtracts screen pixel values from the base
+ *       layer, darkening and increasing contrast. Black areas cause no change;
+ *       lighter areas darken the result. Formula: result = base - screen * alpha.
+ *       GL: GL_FUNC_REVERSE_SUBTRACT, srcFactor=SRC_ALPHA, dstFactor=ONE.</li>
  * </ul>
  *
  * <h3>Screen projection toggle (P key)</h3>
- * When {@code screenProjected} is enabled and a SCREEN_ADD or SCREEN_SUBTRACT
+ * When {@code screenProjected} is enabled and a LINEAR_DODGE or SUBTRACT
  * overlay is active, the screen texture is applied via a <em>second render pass
  * on the same 3-D point-cloud mesh</em> using projective texture mapping:
  * <pre>
@@ -52,7 +57,7 @@ import static at.njank.kinect.SkeletonConstants.*;
  * </pre>
  * Each depth point samples the screen at the screen-space pixel it projects to,
  * so the screen content conforms exactly to the 3-D geometry rather than sitting
- * as a flat 2-D quad in front of it.  The SCREEN_ADD / SCREEN_SUBTRACT blend
+ * as a flat 2-D quad in front of it.  The LINEAR_DODGE / SUBTRACT blend
  * equations still apply, so the camera colours beneath are never fully replaced.
  * When {@code screenProjected} is false (default) the existing 2-D quad path is used.
  *
@@ -83,24 +88,29 @@ public class ARVisualizer implements Visualizer {
         /** Pure AR - no overlay, camera colours only. */
         NONE,
         /**
-         * Spectral tint from system audio (same pipeline as AudioVisualizer
-         * but without Z displacement so the cloud geometry is stable).
+         * Spectral tint from system audio layered over camera colours.
+         * Each pixel's frequency band is derived from its radial distance
+         * from the depth image centre. Tint weight scales with band amplitude.
          */
         AUDIO,
         /**
-         * Screen overlay - Linear Dodge (Add) blend: src x alpha + dst.
-         * Bright areas of the captured screen add luminance to the AR cloud
-         * without replacing camera pixel colours.
-         * GL equation: GL_FUNC_ADD, srcFactor=SRC_ALPHA, dstFactor=ONE.
+         * Linear Dodge (Add): adds the screen pixel values to the base layer.
+         * Works by mathematically adding the brightness of the screen to the
+         * camera colours. Black screen pixels cause no change; lighter pixels
+         * push results toward white, producing high-contrast glowing effects.
+         * Formula: result = clamp(base + screen * alpha, 0, 1).
+         * GL: GL_FUNC_ADD, srcFactor=SRC_ALPHA, dstFactor=ONE.
          */
-        SCREEN_ADD,
+        LINEAR_DODGE,
         /**
-         * Screen overlay - Subtract blend: dst - src x alpha.
-         * The captured screen subtracts luminance from the AR cloud, darkening
-         * regions that are bright in the captured frame.
-         * GL equation: GL_FUNC_REVERSE_SUBTRACT, srcFactor=SRC_ALPHA, dstFactor=ONE.
+         * Subtract: subtracts the screen pixel values from the base layer.
+         * Darkens images by removing colour values from the camera colours.
+         * Black screen pixels cause no change; lighter pixels darken the result,
+         * increasing darkness and contrast. Acts as the inverse of Divide.
+         * Formula: result = clamp(base - screen * alpha, 0, 1).
+         * GL: GL_FUNC_REVERSE_SUBTRACT, srcFactor=SRC_ALPHA, dstFactor=ONE.
          */
-        SCREEN_SUBTRACT
+        SUBTRACT
     }
 
     private Overlay overlay = Overlay.NONE;
@@ -119,8 +129,25 @@ public class ARVisualizer implements Visualizer {
     private static final float DEPTH_FAR         = 5.0f;
     /** Falloff exponent: (1-t)^DEPTH_SCALE_CURVE gives near-surface dominance. */
     private static final float DEPTH_SCALE_CURVE = 2.0f;
-    /** Maximum tint blend weight at peak amplitude. 0=no tint, 1=full tint colour. */
-    private static final float BAND_TINT_STRENGTH = 0.35f;
+    /**
+     * Maximum tint blend weight at peak amplitude.
+     * 0=no tint, 1=full tint colour replacing camera colour at loudest beat.
+     * Keep < 1 to preserve the underlying camera image.
+     */
+    private static final float BAND_TINT_STRENGTH = 0.30f;
+
+    /**
+     * Maximum Z protrusion in metres at full amplitude on a near pixel.
+     * Identical to AudioVisualizer.MAX_PUSH so both modes feel the same.
+     */
+    private static final float MAX_PUSH = 0.35f;
+
+    /**
+     * Power exponent applied to band value before scaling to push distance.
+     * High value = only very loud beats produce visible protrusion.
+     * Identical to AudioVisualizer.PUSH_CURVE.
+     */
+    private static final float PUSH_CURVE = 15.0f;
 
     // -----------------------------------------------------------------------
     // Geometry
@@ -135,7 +162,7 @@ public class ARVisualizer implements Visualizer {
     // Joint visual sizes
     private static final float JOINT_RADIUS = 9f;  // screen-space pixels
 
-    // Alpha applied to the screen overlay in both SCREEN_ADD and SCREEN_SUBTRACT modes.
+    // Alpha applied to the screen overlay in both LINEAR_DODGE and SUBTRACT modes.
     // Higher values = stronger screen effect; lower = subtler blend with camera colours.
     private static final float SCREEN_OVERLAY_ALPHA = 0.55f;
 
@@ -160,7 +187,7 @@ public class ARVisualizer implements Visualizer {
     /**
      * Fullscreen quad mesh used for the 2-D flat screen overlay path.
      * Two triangles covering NDC [-1,1], with per-vertex UV accounting
-     * for DXGI's top-down pixel order (V=0 at top, V=1 at bottom).
+     * with V=1 at top and V=0 at bottom, matching the projective shader path.
      * Using a raw mesh instead of SpriteBatch ensures the blend equation
      * set by the caller is never overwritten by SpriteBatch internals.
      */
@@ -311,18 +338,19 @@ public class ARVisualizer implements Visualizer {
         screenOrtho.setToOrtho2D(0, 0, w, h);
 
         // Fullscreen quad: two triangles in NDC space [-1,1].
-        // UV V=0 at top, V=1 at bottom - DXGI row-0 (screen top) is first
-        // in the buffer, so V=0 must map to the top of the image.
+        // V=1 at top (NDC y=+1), V=0 at bottom (NDC y=-1).
+        // This matches the projective shader's convention (ndcY*0.5+0.5 gives
+        // V=1 at top) so both paths produce an identical-looking overlay.
         // Vertex layout: x, y (NDC), u, v
         screenQuad = new Mesh(true, 4, 6,
             new VertexAttribute(VertexAttributes.Usage.Position,           2, "a_position"),
             new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, "a_texCoord0"));
         screenQuad.setVertices(new float[]{
             // x      y     u     v
-            -1f,  -1f,  0f,   1f,   // bottom-left  -> V=1 (image bottom)
-             1f,  -1f,  1f,   1f,   // bottom-right -> V=1
-             1f,   1f,  1f,   0f,   // top-right    -> V=0 (image top)
-            -1f,   1f,  0f,   0f    // top-left     -> V=0
+            -1f,  -1f,  0f,   0f,   // bottom-left  -> V=0
+             1f,  -1f,  1f,   0f,   // bottom-right -> V=0
+             1f,   1f,  1f,   1f,   // top-right    -> V=1
+            -1f,   1f,  0f,   1f    // top-left     -> V=1
         });
         screenQuad.setIndices(new short[]{ 0, 1, 2, 2, 3, 0 });
         // ndcIdentity passes x,y straight through as clip coords (w=1, z=0)
@@ -399,7 +427,7 @@ public class ARVisualizer implements Visualizer {
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         }
 
-        // ---- Screen overlay (SCREEN_ADD or SCREEN_SUBTRACT) ----
+        // ---- Screen overlay (LINEAR_DODGE or SUBTRACT) ----
         //
         // Two rendering paths are available, selected by screenProjected:
         //
@@ -414,22 +442,26 @@ public class ARVisualizer implements Visualizer {
         //   This makes the screen content conform to the 3-D geometry: points that
         //   project to the same screen pixel share the same screen sample.
         //
-        // Both paths respect the SCREEN_ADD / SCREEN_SUBTRACT blend equations so
+        // Both paths respect the LINEAR_DODGE / SUBTRACT blend equations so
         // the underlying camera colours are never fully replaced.
-        boolean isScreenOverlay = (overlay == Overlay.SCREEN_ADD
-                               || overlay == Overlay.SCREEN_SUBTRACT);
+        boolean isScreenOverlay = (overlay == Overlay.LINEAR_DODGE
+                               || overlay == Overlay.SUBTRACT);
         if (isScreenOverlay && screenCapture != null) {
             screenCapture.update();
             Texture screenTex = screenCapture.getTexture();
             if (screenTex != null) {
                 // Set up the shared blend state for both paths
                 Gdx.gl.glEnable(GL20.GL_BLEND);
-                if (overlay == Overlay.SCREEN_ADD) {
-                    // Linear Dodge (Add): result = dst + src * alpha
+                if (overlay == Overlay.LINEAR_DODGE) {
+                    // Linear Dodge (Add): result = clamp(base + screen * alpha, 0, 1)
+                    // GL_FUNC_ADD with dstFactor=ONE adds the scaled screen colour
+                    // directly to the base; black screen = no change, white = full add.
                     Gdx.gl.glBlendEquation(GL20.GL_FUNC_ADD);
                     Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
                 } else {
-                    // Subtract: result = dst - src * alpha
+                    // Subtract: result = clamp(base - screen * alpha, 0, 1)
+                    // GL_FUNC_REVERSE_SUBTRACT computes dst*1 - src*alpha;
+                    // black screen = no change, white screen = maximum darkening.
                     Gdx.gl.glBlendEquation(GL20.GL_FUNC_REVERSE_SUBTRACT);
                     Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE);
                 }
@@ -522,7 +554,7 @@ public class ARVisualizer implements Visualizer {
     // Overlay cycling (called by Main on O key press)
     // -----------------------------------------------------------------------
 
-    /** Cycles the overlay: NONE -> AUDIO -> SCREEN_ADD -> SCREEN_SUBTRACT -> NONE. */
+    /** Cycles the overlay: NONE -> AUDIO -> LINEAR_DODGE -> SUBTRACT -> NONE. */
     public void nextOverlay() {
         Overlay[] vals = Overlay.values();
         overlay = vals[(overlay.ordinal() + 1) % vals.length];
@@ -671,9 +703,8 @@ public class ARVisualizer implements Visualizer {
      * is 0 for all pixels and the fragment shader outputs pure camera colour.
      *
      * <p>When {@code bandValues} is non-null (AUDIO overlay), each pixel
-     * receives a spectral hue tint weighted by:
-     * {@code band x BAND_TINT_STRENGTH x depthScale}, where depthScale gives
-     * near pixels the strongest tint and far pixels none.
+     * receives a spectral hue tint weighted by {@code band x BAND_TINT_STRENGTH}.
+     * The effect is uniform across all depths so it is visible everywhere.
      *
      * <p>Invalid pixels (UV out of range or z <= 0) receive sentinel UV (-1)
      * which the shader detects and discards.
@@ -697,42 +728,59 @@ public class ARVisualizer implements Visualizer {
 
             vertices[vi++] = x;
             vertices[vi++] = y;
-            vertices[vi++] = -z; // negate Kinect Z -> positive world Z
+            // z written after band block so push is available - see below
+            int zIdx = vi++; // reserve slot; filled after band computation
 
             // UV: negative sentinel tells the shader to discard this point
             vertices[vi++] = invalid ? -1f : u;
             vertices[vi++] = invalid ? -1f : v;
 
-            // Spectral hue tint (AUDIO overlay) or zero (NONE / SCREEN)
+            // Spectral hue tint + Z displacement (AUDIO overlay) or zero (NONE / SCREEN)
             float tr = 0f, tg = 0f, tb = 0f, tintWeight = 0f;
+            float push = 0f; // Z protrusion in metres toward the viewer
             if (bandValues != null && !invalid) {
                 // Band value and radial position for this pixel
                 float band       = bandValues[pixelBand[i]];
                 float radialNorm = pixelRadial[i];
 
-                // Depth-based impact scale: near pixels get full tint, far get none
+                // Depth-based impact scale: near pixels protrude more than far
                 float t          = MathUtils.clamp(
                     (z - DEPTH_NEAR) / (DEPTH_FAR - DEPTH_NEAR), 0f, 1f);
                 float depthScale = (float) Math.pow(1f - t, DEPTH_SCALE_CURVE);
 
-                // Spectral hue palette (centre = warm bass, edge = cool treble)
-                //   radialNorm 0.0 (centre) -> warm orange-red (1.00, 0.35, 0.00)
-                //   radialNorm 0.5 (mid)    -> neutral green   (0.10, 0.90, 0.10)
-                //   radialNorm 1.0 (corner) -> cool cyan-blue  (0.00, 0.60, 1.00)
-                if (radialNorm < 0.5f) {
-                    float s = radialNorm / 0.5f;
-                    tr = 1.00f - s * 0.90f;
-                    tg = 0.35f + s * 0.55f;
-                    tb = 0.00f + s * 0.10f;
+                // Z displacement - identical formula to AudioVisualizer.fillVertices
+                // push = band^PUSH_CURVE * MAX_PUSH * depthScale
+                // High PUSH_CURVE means only very loud beats produce visible protrusion.
+                push = (float) Math.pow(band, PUSH_CURVE) * MAX_PUSH * depthScale;
+
+                // Exponential ramp before palette lookup so quiet bands cluster
+                // near the cool end while loud bands spread rapidly toward red.
+                // bandCurved = band^3: at band=0.3 -> 0.027 (still blue),
+                //   at band=0.7 -> 0.343, at band=1.0 -> 1.0 (full red).
+                float bandCurved = band * band * band;
+
+                // Colour palette keyed to curved amplitude:
+                //   bandCurved = 0.0 (silent)  -> cool cyan-blue  (0.00, 0.60, 1.00)
+                //   bandCurved = 0.5 (mid)     -> neutral green   (0.10, 0.90, 0.10)
+                //   bandCurved = 1.0 (loudest) -> warm orange-red (1.00, 0.35, 0.00)
+                if (bandCurved < 0.5f) {
+                    float s = bandCurved / 0.5f;          // 0->1 from silent to mid
+                    tr = 0.00f + s * 0.10f;               // blue -> faint red
+                    tg = 0.60f + s * 0.30f;               // cyan -> green
+                    tb = 1.00f - s * 0.90f;               // blue -> faint blue
                 } else {
-                    float s = (radialNorm - 0.5f) / 0.5f;
-                    tr = 0.10f - s * 0.10f;
-                    tg = 0.90f - s * 0.30f;
-                    tb = 0.10f + s * 0.90f;
+                    float s = (bandCurved - 0.5f) / 0.5f; // 0->1 from mid to loudest
+                    tr = 0.10f + s * 0.90f;               // faint red -> full red
+                    tg = 0.90f - s * 0.55f;               // green -> warm green
+                    tb = 0.10f - s * 0.10f;               // faint blue -> zero
                 }
-                // Tint weight: 0 at silence/far, up to BAND_TINT_STRENGTH at peak
-                tintWeight = band * BAND_TINT_STRENGTH * depthScale;
+                // Tint weight: 0 at silence, up to BAND_TINT_STRENGTH at peak.
+                // Not depth-scaled so colour tint is visible even far away.
+                tintWeight = band * BAND_TINT_STRENGTH;
             }
+
+            // Write Z into the reserved slot: negate Kinect Z, then add audio push
+            vertices[zIdx] = -z + push;
 
             vertices[vi++] = tr;
             vertices[vi++] = tg;
@@ -899,11 +947,10 @@ public class ARVisualizer implements Visualizer {
             "    gl_PointSize = 2.5;\n" +
             // Fixed projection: where this point appeared in the front-facing view.
             // Perspective divide maps clip-space to NDC [-1,1], then remap to [0,1].
-            // No extra Y flip: the screenQuad mesh already encodes V=0 at the
-            // top and V=1 at the bottom (matching DXGI's top-down row order).
-            // This projective shader samples the same texture directly, so
-            // NDC Y=+1 (viewport top) -> V=1 (image bottom) would be wrong;
-            // leave as-is and let the fixed projector handle alignment.
+            // No extra Y flip needed: both the screenQuad mesh (2-D path) and
+            // this projective shader use the same V convention (V=1 at top,
+            // V=0 at bottom), so ndcY*0.5+0.5 gives V=1 for NDC y=+1 (top)
+            // which matches the quad, producing identical alignment.
             "    vec4 fixedClip = u_fixedProjTrans * vec4(a_position, 1.0);\n" +
             "    float ndcX     = fixedClip.x / fixedClip.w;\n" +
             "    float ndcY     = fixedClip.y / fixedClip.w;\n" +
