@@ -22,7 +22,7 @@ import static at.njank.kinect.SkeletonConstants.*;
  * Visualizer mode 5 - "Depth".
  *
  * <p>Renders every Kinect v2 depth pixel as a coloured 3-D point, graded
- * red (near) → green → blue (far) by metric Z distance.
+ * red (near) -> green -> blue (far) by metric Z distance.
  *
  * <h3>Skeleton alignment</h3>
  * The skeleton is rendered <em>in 3-D world space</em> using the same orbit
@@ -52,12 +52,12 @@ public class DepthVisualizer implements Visualizer {
     /** Ortho matrix kept in sync with window size for billboard joint circles. */
     private final Matrix4 screenOrtho = new Matrix4();
 
-    // Reusable vectors — avoids per-frame allocation
+    // Reusable vectors - avoids per-frame allocation
     private final Vector3 tmpA = new Vector3();
     private final Vector3 tmpB = new Vector3();
 
     // -----------------------------------------------------------------------
-    // Camera — same defaults as AR, both use negated-Z coordinate space
+    // Camera - same defaults as AR, both use negated-Z coordinate space
     // -----------------------------------------------------------------------
 
     private final OrbitCamera orbit =
@@ -149,6 +149,9 @@ public class DepthVisualizer implements Visualizer {
     @Override
     public InputProcessor getInputProcessor() { return orbit.getInputProcessor(); }
 
+    /** Returns the orbit camera so callers can save/restore its state. */
+    public OrbitCamera getOrbit() { return orbit; }
+
     @Override
     public void resetCamera() { orbit.reset(); }
 
@@ -169,7 +172,7 @@ public class DepthVisualizer implements Visualizer {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
 
-        // ── Bones: 3-D lines in world space ──
+        // -- Bones: 3-D lines in world space --
         sr.setProjectionMatrix(orbit.getCamera().combined);
         sr.begin(ShapeRenderer.ShapeType.Line);
         for (int s = 0; s < skeletons.length; s++) {
@@ -186,7 +189,7 @@ public class DepthVisualizer implements Visualizer {
         }
         sr.end();
 
-        // ── Joints: project to screen, draw billboard circles ──
+        // Joints: project to screen, draw billboard circles
         sr.setProjectionMatrix(screenOrtho);
         sr.begin(ShapeRenderer.ShapeType.Filled);
         for (int s = 0; s < skeletons.length; s++) {
@@ -233,9 +236,9 @@ public class DepthVisualizer implements Visualizer {
     // -----------------------------------------------------------------------
 
     /**
-     * Packs (x, y, −z, r, g, b, a) per pixel.
-     * Colour is graded red → green → blue over 0.5 m - 5.0 m.
-     * Pixels with z ≤ 0 get alpha = 0 and are discarded by the shader.
+     * Packs (x, y, -z, r, g, b, a) per pixel.
+     * Colour is graded red -> green -> blue over 0.5 m - 5.0 m.
+     * Pixels with z <= 0 get alpha = 0 and are discarded by the shader.
      */
     private void fillVertices(float[] xyz) {
         int vi = 0;
@@ -250,7 +253,7 @@ public class DepthVisualizer implements Visualizer {
                 vertices[vi++] = 0f;
                 vertices[vi++] = 0f;
                 vertices[vi++] = 0f;
-                vertices[vi++] = 0f; // alpha=0 → discard
+                vertices[vi++] = 0f; // alpha=0 -> discard
             } else {
                 float t = MathUtils.clamp((z - 0.5f) / 4.5f, 0f, 1f);
                 float r, g, bl;

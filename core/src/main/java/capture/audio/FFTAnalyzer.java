@@ -1,9 +1,9 @@
-package at.njank.kinect;
+package capture.audio;
 
 /**
  * Lightweight FFT analyser with per-band AGC and soft compression.
  *
- * <p>Used by {@link AudioVisualizer} to convert raw PCM samples from
+ * <p>Used to convert raw PCM samples from
  * {@link WasapiLoopbackCapture} into a normalised per-band magnitude array
  * that is mapped onto the Kinect depth point-cloud.
  *
@@ -15,12 +15,12 @@ package at.njank.kinect;
  *
  * <h3>Solution: per-band AGC + soft compression</h3>
  * <ol>
- *   <li><b>Per-band AGC</b> — each band independently tracks its own recent
+ *   <li><b>Per-band AGC</b> - each band independently tracks its own recent
  *       peak and normalises against it.  The bars use the <em>full</em> height
  *       range relative to that song's actual dynamics, not a fixed dB ceiling.
  *       Quiet passages open up; loud passages don't clip.
  *       {@link #AGC_PEAK_DECAY} controls how fast the peak releases.</li>
- *   <li><b>Soft-knee compression</b> — instead of a hard [0,1] clamp, a
+ *   <li><b>Soft-knee compression</b> - instead of a hard [0,1] clamp, a
  *       tanh-based curve gently rolls off values above ~0.7, so peaks feel
  *       "rounded" rather than brick-walled.
  *       {@link #COMPRESSION} controls how aggressively it squashes.</li>
@@ -37,7 +37,7 @@ package at.njank.kinect;
  *                           Raise to -50 to cut more background noise.
  *
  *  AGC_PEAK_DECAY   [0..1]  How fast the per-band peak ceiling falls back down.
- *                           0.998 = very slow (adapts over ~5 s) — recommended.
+ *                           0.998 = very slow (adapts over ~5 s) - recommended.
  *                           0.990 = faster, adapts in ~1 s.
  *                           0.970 = quick, chases every loud hit.
  *
@@ -48,8 +48,8 @@ package at.njank.kinect;
  *
  *  COMPRESSION      [>0]    Soft-knee curve steepness fed into tanh.
  *                           1.5 = gentle S-curve, peaks slightly rounded.
- *                           2.5 = moderate — bars rarely hit full height.
- *                           4.0 = strong — only the loudest transients peak.
+ *                           2.5 = moderate - bars rarely hit full height.
+ *                           4.0 = strong - only the loudest transients peak.
  *
  *  PERCEPTUAL_BOOST         Extra dB per band index (treble tilt compensation).
  *                           0.0 = raw FFT. 0.4 = gentle. 0.8 = strong lift.
@@ -78,7 +78,7 @@ public class FFTAnalyzer {
      * down until it meets the actual signal again.
      *
      * <pre>
-     *  0.999 = very slow (~10 s to halve) — smooth, song-level adaptation
+     *  0.999 = very slow (~10 s to halve) - smooth, song-level adaptation
      *  0.997 = recommended (~3-4 s)
      *  0.990 = fast (~1 s), chases loud hits quickly
      * </pre>
@@ -93,7 +93,7 @@ public class FFTAnalyzer {
      *
      * <pre>
      *  15f = aggressive noise gate (bars stay low during near-silence)
-     *  25f = moderate — recommended
+     *  25f = moderate - recommended
      *  40f = loose; bars animate even on quiet background noise
      * </pre>
      */
@@ -105,7 +105,7 @@ public class FFTAnalyzer {
      *
      * <pre>
      *  1.5 = very gentle rounding of peaks
-     *  2.5 = moderate — recommended for modern mastered music
+     *  2.5 = moderate - recommended for modern mastered music
      *  4.0 = strong squash; only transient hits reach full amplitude
      * </pre>
      */
@@ -140,10 +140,10 @@ public class FFTAnalyzer {
     /**
      * Constructs an analyser.
      *
-     * @param fftSize  FFT window size — must be a power of 2 (e.g. 2048).
+     * @param fftSize  FFT window size - must be a power of 2 (e.g. 2048).
      *                 Larger values give better bass frequency resolution.
      * @param bands    Number of output frequency bands (e.g. 48).
-     *                 Must satisfy {@code bands ≤ fftSize / 2}.
+     *                 Must satisfy {@code bands <= fftSize / 2}.
      */
     public FFTAnalyzer(int fftSize, int bands) {
         if (Integer.bitCount(fftSize) != 1)
@@ -216,11 +216,11 @@ public class FFTAnalyzer {
                 Math.max(agcPeak[b] * AGC_PEAK_DECAY, AGC_MIN_DB),
                 dbAboveFloor);
 
-            // Normalise against the running peak → [0, 1] where 1 = recent loudest
+            // Normalise against the running peak -> [0, 1] where 1 = recent loudest
             float norm = dbAboveFloor / agcPeak[b];
 
             // ── Soft-knee compression via tanh ────────────────────────────
-            // tanh(x * k) / tanh(k) maps [0,1]→[0,1] with a soft ceiling so
+            // tanh(x * k) / tanh(k) maps [0,1]->[0,1] with a soft ceiling so
             // only the loudest transients actually reach 1.0.
             float tanhK = (float) Math.tanh(COMPRESSION);
             norm = (float)(Math.tanh(norm * COMPRESSION) / tanhK);
@@ -239,7 +239,7 @@ public class FFTAnalyzer {
      * Returns the current smoothed band magnitudes in the range {@code [0, 1]}.
      * The array has length {@code bands} as passed to the constructor.
      *
-     * <p>The returned array is the analyser's internal buffer — do not modify
+     * <p>The returned array is the analyser's internal buffer - do not modify
      * it and do not cache it across calls to {@link #analyze}.
      */
     public float[] getBandValues() { return bandValues; }

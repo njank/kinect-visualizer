@@ -9,7 +9,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 
 /**
- * Reusable orbit/pan/zoom camera shared by {@link at.njank.kinect.SkeletonVisualizer3D},
+ * Orbit/pan/zoom camera
  * {@link at.njank.kinect.DepthVisualizer}, and {@link at.njank.kinect.ARVisualizer}.
  *
  * <p>Controls (polling-based, called once per frame from the visualizer's
@@ -23,8 +23,8 @@ import com.badlogic.gdx.math.Vector3;
  *
  * <p>Callers should:
  * <ol>
- *   <li>Construct with desired defaults and look-at target Z.</li>
- *   <li>Call {@link #init(int, int)} once on the GL thread (inside
+ *   <li>Construct with desired defaults and look at target Z.</li>
+ *   <li>Call {@link #init(int, int, float, float)} once on the GL thread (inside
  *       the visualizer's {@code create()} method).</li>
  *   <li>Call {@link #handleInput()} at the top of each {@code render()} frame.</li>
  *   <li>Pass {@link #getInputProcessor()} to the {@code InputMultiplexer}
@@ -170,6 +170,41 @@ public class OrbitCamera {
 
     public PerspectiveCamera getCamera()          { return camera;         }
     public InputProcessor    getInputProcessor()   { return inputProcessor; }
+
+    /**
+     * Returns a snapshot of the current orbit state as a float array:
+     * {@code [yaw, pitch, zoom, panX, panY]}.
+     * Pass the returned array to {@link #setState} to restore it later.
+     */
+    /**
+     * Reseeds the previous-mouse-position to the current cursor location.
+     * Call this whenever the visualizer becomes active so the first
+     * {@link #handleInput()} call computes a zero delta and the camera
+     * does not jump.
+     */
+    public void seedMouse() {
+        pmx = Gdx.input.getX();
+        pmy = Gdx.input.getY();
+    }
+
+    public float[] getState() {
+        return new float[]{ yaw, pitch, zoom, panX, panY };
+    }
+
+    /**
+     * Restores the orbit state from an array previously returned by
+     * {@link #getState} and updates the camera immediately.
+     *
+     * @param state float array {@code [yaw, pitch, zoom, panX, panY]}
+     */
+    public void setState(float[] state) {
+        yaw   = state[0];
+        pitch = state[1];
+        zoom  = state[2];
+        panX  = state[3];
+        panY  = state[4];
+        updateCamera();
+    }
 
     // -----------------------------------------------------------------------
     // Private helpers

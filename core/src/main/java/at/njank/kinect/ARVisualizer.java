@@ -1,5 +1,8 @@
 package at.njank.kinect;
 
+import capture.audio.FFTAnalyzer;
+import capture.audio.WasapiLoopbackCapture;
+import capture.screen.ScreenCapture;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.graphics.Color;
@@ -33,10 +36,6 @@ import static at.njank.kinect.SkeletonConstants.*;
  * <h3>Overlay modes (press O to cycle)</h3>
  * <ul>
  *   <li><b>NONE</b> - pure AR: camera texture on point cloud, no extra overlay.</li>
- *   <li><b>AUDIO</b> - spectral tint from system audio layered over the camera
- *       colour, plus Z displacement that protrudes depth pixels toward the
- *       viewer in sync with the audio. Frequency bands map radially from the
- *       depth image centre (same formula as AudioVisualizer).</li>
  *   <li><b>LINEAR_DODGE</b> - Linear Dodge (Add): adds the screen pixel values
  *       to the base layer. Black areas of the screen cause no change; lighter
  *       areas push the result toward white. Formula: result = base + screen * alpha.
@@ -88,12 +87,6 @@ public class ARVisualizer implements Visualizer {
         /** Pure AR - no overlay, camera colours only. */
         NONE,
         /**
-         * Spectral tint from system audio layered over camera colours.
-         * Each pixel's frequency band is derived from its radial distance
-         * from the depth image centre. Tint weight scales with band amplitude.
-         */
-        AUDIO,
-        /**
          * Linear Dodge (Add): adds the screen pixel values to the base layer.
          * Works by mathematically adding the brightness of the screen to the
          * camera colours. Black screen pixels cause no change; lighter pixels
@@ -116,7 +109,7 @@ public class ARVisualizer implements Visualizer {
     private Overlay overlay = Overlay.NONE;
 
     // -----------------------------------------------------------------------
-    // Audio overlay constants (identical to AudioVisualizer)
+    // Audio overlay constants
     // -----------------------------------------------------------------------
 
     /** FFT window size in samples - must be a power of 2. */
@@ -130,22 +123,13 @@ public class ARVisualizer implements Visualizer {
     /** Falloff exponent: (1-t)^DEPTH_SCALE_CURVE gives near-surface dominance. */
     private static final float DEPTH_SCALE_CURVE = 2.0f;
     /**
-     * Maximum tint blend weight at peak amplitude.
-     * 0=no tint, 1=full tint colour replacing camera colour at loudest beat.
-     * Keep < 1 to preserve the underlying camera image.
-     */
-    private static final float BAND_TINT_STRENGTH = 0.30f;
-
-    /**
      * Maximum Z protrusion in metres at full amplitude on a near pixel.
-     * Identical to AudioVisualizer.MAX_PUSH so both modes feel the same.
      */
     private static final float MAX_PUSH = 0.35f;
 
     /**
      * Power exponent applied to band value before scaling to push distance.
      * High value = only very loud beats produce visible protrusion.
-     * Identical to AudioVisualizer.PUSH_CURVE.
      */
     private static final float PUSH_CURVE = 15.0f;
 
@@ -250,7 +234,7 @@ public class ARVisualizer implements Visualizer {
     // -----------------------------------------------------------------------
 
     private WasapiLoopbackCapture audioCapture;
-    private FFTAnalyzer           fft;
+    private FFTAnalyzer fft;
 
     /**
      * Pre-computed frequency band index for every depth pixel.
@@ -259,12 +243,6 @@ public class ARVisualizer implements Visualizer {
      * Filled once in create(); O(1) lookup per pixel per frame.
      */
     private final int[]   pixelBand   = new int[POINT_COUNT];
-
-    /**
-     * Pre-computed normalised radial distance [0..1] for every depth pixel,
-     * parallel to pixelBand[].  Used to derive the spectral hue tint colour.
-     */
-    private final float[] pixelRadial = new float[POINT_COUNT];
 
     /**
      * Current FFT band values [0..1] - updated once per frame when audio overlay
@@ -286,6 +264,12 @@ public class ARVisualizer implements Visualizer {
 
     /** Whether to draw the skeleton overlay.  Toggled by the S key (default off). */
     private boolean skeletonEnabled = false;
+
+    /**
+     * When true, system audio drives Z displacement of the depth cloud.
+     * Independent of overlay and skeleton; toggled by the A key.
+     */
+    private boolean audioEnabled = false;
 
     /**
      * When true and a SCREEN overlay is active, the screen texture is projected
@@ -392,8 +376,8 @@ public class ARVisualizer implements Visualizer {
             uploadBgra(colorFrame);
         }
 
-        // ---- Audio band values (used in AUDIO overlay, zeroed otherwise) ----
-        if (overlay == Overlay.AUDIO && audioCapture != null && audioCapture.isRunning()) {
+        // ---- Audio band values (when audioEnabled, independent of overlay) ----
+        if (audioEnabled && audioCapture != null && audioCapture.isRunning()) {
             fft.analyze(audioCapture.getSamples());
             System.arraycopy(fft.getBandValues(), 0, bandValues, 0, AUDIO_BANDS);
         } else {
@@ -402,16 +386,15 @@ public class ARVisualizer implements Visualizer {
 
         // ---- Rebuild point-cloud vertices ----
         // Always rebuild when audio is live (band values change every frame).
-        // Dedup depth/UV frames when audio is inactive.
+        // Dedup depth/UV frames when audio is off and depth hasn't changed.
         float[] xyz = kinect.getDepthXYZ();
         float[] uv  = kinect.getDepthUV();
         boolean newDepth = xyz != null && uv != null
                         && (xyz != lastXYZ || uv != lastUV);
-        boolean audioActive = (overlay == Overlay.AUDIO);
-        if (newDepth || audioActive) {
+        if (newDepth || audioEnabled) {
             if (newDepth) { lastXYZ = xyz; lastUV = uv; }
             if (lastXYZ != null && lastUV != null) {
-                fillVertices(lastXYZ, lastUV, (overlay == Overlay.AUDIO) ? bandValues : null);
+                fillVertices(lastXYZ, lastUV, audioEnabled ? bandValues : null);
                 uvMesh.setVertices(vertices);
             }
         }
@@ -483,10 +466,10 @@ public class ARVisualizer implements Visualizer {
                     Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
                     screenTex.bind(0);
                     screenProjShader.bind();
-                    // u_projTrans    - live orbit matrix: moves gl_Position through 3-D space
-                    // u_fixedProjTrans - frozen front-facing matrix: keeps UV fixed in world
+                    // Both matrices are the live orbit camera so each point samples the screen
+                    // pixel it actually projects to - correct at any zoom, pan, or orbit angle.
                     screenProjShader.setUniformMatrix("u_projTrans",      orbit.getCamera().combined);
-                    screenProjShader.setUniformMatrix("u_fixedProjTrans", fixedProjMatrix);
+                    screenProjShader.setUniformMatrix("u_fixedProjTrans", orbit.getCamera().combined);
                     screenProjShader.setUniformi("u_screenTex", 0);
                     screenProjShader.setUniformf("u_alpha", SCREEN_OVERLAY_ALPHA);
                     uvMesh.render(screenProjShader, GL20.GL_POINTS, 0, POINT_COUNT);
@@ -541,6 +524,9 @@ public class ARVisualizer implements Visualizer {
     @Override
     public InputProcessor getInputProcessor() { return orbit.getInputProcessor(); }
 
+    /** Returns the orbit camera so callers can save/restore its state. */
+    public OrbitCamera getOrbit() { return orbit; }
+
     @Override
     public void resetCamera() { orbit.reset(); }
 
@@ -554,7 +540,7 @@ public class ARVisualizer implements Visualizer {
     // Overlay cycling (called by Main on O key press)
     // -----------------------------------------------------------------------
 
-    /** Cycles the overlay: NONE -> AUDIO -> LINEAR_DODGE -> SUBTRACT -> NONE. */
+    /** Cycles the screen overlay: NONE -> LINEAR_DODGE -> SUBTRACT -> NONE. */
     public void nextOverlay() {
         Overlay[] vals = Overlay.values();
         overlay = vals[(overlay.ordinal() + 1) % vals.length];
@@ -573,6 +559,12 @@ public class ARVisualizer implements Visualizer {
 
     /** Returns whether 3-D projective screen rendering is enabled. */
     public boolean isScreenProjected() { return screenProjected; }
+
+    /** Enables or disables audio-driven Z displacement (A key). */
+    public void setAudioEnabled(boolean enabled) { audioEnabled = enabled; }
+
+    /** Returns whether audio Z displacement is active. */
+    public boolean isAudioEnabled() { return audioEnabled; }
 
     // -----------------------------------------------------------------------
     // 3-D skeleton overlay
@@ -659,7 +651,7 @@ public class ARVisualizer implements Visualizer {
      * Pre-computes pixelBand[] and pixelRadial[] for every depth pixel using
      * an aspect-ratio-corrected radial distance from the depth image centre.
      *
-     * <p>Formula (same as AudioVisualizer):
+     * <p>Formula
      * <pre>
      *   cx    = DEPTH_W / 2.0   cy    = DEPTH_H / 2.0
      *   normX = (col - cx) / cx          // [-1..1]
@@ -685,8 +677,7 @@ public class ARVisualizer implements Visualizer {
                 float norm  = Math.min(1f,
                     (float) Math.sqrt(normX * normX + normY * normY) * INV_R2);
                 int idx = row * DEPTH_W + col;
-                pixelRadial[idx] = norm;
-                pixelBand[idx]   = Math.min(AUDIO_BANDS - 1, (int)(norm * AUDIO_BANDS));
+                pixelBand[idx] = Math.min(AUDIO_BANDS - 1, (int)(norm * AUDIO_BANDS));
             }
         }
     }
@@ -735,48 +726,20 @@ public class ARVisualizer implements Visualizer {
             vertices[vi++] = invalid ? -1f : u;
             vertices[vi++] = invalid ? -1f : v;
 
-            // Spectral hue tint + Z displacement (AUDIO overlay) or zero (NONE / SCREEN)
+            // Audio Z push only - no colour tint (audio is purely spatial)
             float tr = 0f, tg = 0f, tb = 0f, tintWeight = 0f;
             float push = 0f; // Z protrusion in metres toward the viewer
             if (bandValues != null && !invalid) {
-                // Band value and radial position for this pixel
-                float band       = bandValues[pixelBand[i]];
-                float radialNorm = pixelRadial[i];
+                float band = bandValues[pixelBand[i]];
 
                 // Depth-based impact scale: near pixels protrude more than far
                 float t          = MathUtils.clamp(
                     (z - DEPTH_NEAR) / (DEPTH_FAR - DEPTH_NEAR), 0f, 1f);
                 float depthScale = (float) Math.pow(1f - t, DEPTH_SCALE_CURVE);
 
-                // Z displacement - identical formula to AudioVisualizer.fillVertices
                 // push = band^PUSH_CURVE * MAX_PUSH * depthScale
-                // High PUSH_CURVE means only very loud beats produce visible protrusion.
                 push = (float) Math.pow(band, PUSH_CURVE) * MAX_PUSH * depthScale;
-
-                // Exponential ramp before palette lookup so quiet bands cluster
-                // near the cool end while loud bands spread rapidly toward red.
-                // bandCurved = band^3: at band=0.3 -> 0.027 (still blue),
-                //   at band=0.7 -> 0.343, at band=1.0 -> 1.0 (full red).
-                float bandCurved = band * band * band;
-
-                // Colour palette keyed to curved amplitude:
-                //   bandCurved = 0.0 (silent)  -> cool cyan-blue  (0.00, 0.60, 1.00)
-                //   bandCurved = 0.5 (mid)     -> neutral green   (0.10, 0.90, 0.10)
-                //   bandCurved = 1.0 (loudest) -> warm orange-red (1.00, 0.35, 0.00)
-                if (bandCurved < 0.5f) {
-                    float s = bandCurved / 0.5f;          // 0->1 from silent to mid
-                    tr = 0.00f + s * 0.10f;               // blue -> faint red
-                    tg = 0.60f + s * 0.30f;               // cyan -> green
-                    tb = 1.00f - s * 0.90f;               // blue -> faint blue
-                } else {
-                    float s = (bandCurved - 0.5f) / 0.5f; // 0->1 from mid to loudest
-                    tr = 0.10f + s * 0.90f;               // faint red -> full red
-                    tg = 0.90f - s * 0.55f;               // green -> warm green
-                    tb = 0.10f - s * 0.10f;               // faint blue -> zero
-                }
-                // Tint weight: 0 at silence, up to BAND_TINT_STRENGTH at peak.
-                // Not depth-scaled so colour tint is visible even far away.
-                tintWeight = band * BAND_TINT_STRENGTH;
+                // tr, tg, tb, tintWeight stay 0 - camera colour is preserved.
             }
 
             // Write Z into the reserved slot: negate Kinect Z, then add audio push
@@ -840,7 +803,6 @@ public class ARVisualizer implements Visualizer {
             "void main() {\n" +
             "    if (v_valid < 0.5) discard;\n" +
             "    vec4 camColor = texture2D(u_texture, v_uv);\n" +
-            // tintWeight=0 -> pure camera colour (identical to original AR mode)
             "    vec3 rgb = mix(camColor.rgb, v_tintColor, v_tintWeight);\n" +
             "    gl_FragColor = vec4(rgb, 1.0);\n" +
             "}\n";
@@ -945,12 +907,6 @@ public class ARVisualizer implements Visualizer {
             // Live projection: where this point appears in the current view
             "    gl_Position  = u_projTrans * vec4(a_position, 1.0);\n" +
             "    gl_PointSize = 2.5;\n" +
-            // Fixed projection: where this point appeared in the front-facing view.
-            // Perspective divide maps clip-space to NDC [-1,1], then remap to [0,1].
-            // No extra Y flip needed: both the screenQuad mesh (2-D path) and
-            // this projective shader use the same V convention (V=1 at top,
-            // V=0 at bottom), so ndcY*0.5+0.5 gives V=1 for NDC y=+1 (top)
-            // which matches the quad, producing identical alignment.
             "    vec4 fixedClip = u_fixedProjTrans * vec4(a_position, 1.0);\n" +
             "    float ndcX     = fixedClip.x / fixedClip.w;\n" +
             "    float ndcY     = fixedClip.y / fixedClip.w;\n" +

@@ -1,4 +1,4 @@
-package com.example.capture;
+package capture.screen;
 
 import java.nio.ByteBuffer;
 

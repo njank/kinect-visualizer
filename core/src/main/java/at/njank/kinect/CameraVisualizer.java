@@ -28,16 +28,16 @@ import static at.njank.kinect.SkeletonConstants.*;
  * The Kinect v2 has two separate cameras: a depth sensor (512 × 424) and a
  * colour camera (1920 × 1080). They have different fields of view, focal
  * lengths, and are physically offset from one another. Using
- * {@code Skeleton.get2DJoint()} — which projects joints through the
- * <em>depth</em> camera's intrinsics — produces systematic misalignment on
+ * {@code Skeleton.get2DJoint()} - which projects joints through the
+ * <em>depth</em> camera's intrinsics - produces systematic misalignment on
  * the colour image.
  *
- * <p>The fix uses the depth→colour UV map provided by J4K (same data that
+ * <p>The fix uses the depth->colour UV map provided by J4K (same data that
  * powers the AR point cloud). For each joint:
  * <ol>
  *   <li>Find its depth-image pixel: {@code get2DJoint(j, DEPTH_W, DEPTH_H)}
  *   <li>Look up the colour-image UV at that depth pixel from the UV map
- *   <li>Convert UV → screen position inside the letterboxed image rect:
+ *   <li>Convert UV -> screen position inside the letterboxed image rect:
  *       {@code sx = drawX + u × drawW},
  *       {@code sy = drawY + (1 − v) × drawH}
  *       (the {@code (1 − v)} flip accounts for libGDX's bottom-up Y axis)
@@ -46,7 +46,7 @@ import static at.njank.kinect.SkeletonConstants.*;
  * <h3>Aspect-correct display</h3>
  * The colour image is drawn letterboxed (or pillar-boxed) to preserve its
  * 16 : 9 aspect ratio at any window size. The same draw rectangle is used
- * for the UV → screen conversion so the skeleton stays aligned when the
+ * for the UV -> screen conversion so the skeleton stays aligned when the
  * window is resized.
  */
 public class CameraVisualizer implements Visualizer {
@@ -63,7 +63,7 @@ public class CameraVisualizer implements Visualizer {
     private Texture colorTexture;
     private boolean textureReady = false;
 
-    // Frame-dedup sentinel — only re-upload when the reference changes.
+    // Frame-dedup sentinel - only re-upload when the reference changes.
     private byte[] lastFrame;
 
     /** Whether to draw the skeleton overlay.  Toggled by the S key (default off). */
@@ -104,18 +104,18 @@ public class CameraVisualizer implements Visualizer {
             colorTexture.draw(colorPixmap, 0, 0);
         }
 
-        // --- Letterbox rect — preserves 16:9 regardless of window shape ---
+        // --- Letterbox rect - preserves 16:9 regardless of window shape ---
         float imageAspect  = (float) COLOR_W / COLOR_H; // ≈ 1.778
         float screenAspect = screenW / screenH;
         float drawW, drawH, drawX, drawY;
         if (screenAspect > imageAspect) {
-            // Screen wider than 16:9 → pillarbox
+            // Screen wider than 16:9 -> pillarbox
             drawH = screenH;
             drawW = screenH * imageAspect;
             drawX = (screenW - drawW) * 0.5f;
             drawY = 0;
         } else {
-            // Screen taller than 16:9 → letterbox
+            // Screen taller than 16:9 -> letterbox
             drawW = screenW;
             drawH = screenW / imageAspect;
             drawX = 0;
@@ -130,7 +130,7 @@ public class CameraVisualizer implements Visualizer {
             false, false);
         batch.end();
 
-        // --- Skeleton overlay — UV-mapped to colour-camera space ---
+        // --- Skeleton overlay - UV-mapped to colour-camera space ---
         Skeleton[] skeletons = kinect.getSkeletons();
         float[]    depthUV   = kinect.getDepthUV();
         if (skeletonEnabled && skeletons != null && depthUV != null) {
@@ -173,12 +173,12 @@ public class CameraVisualizer implements Visualizer {
      * Draws skeleton joints and bones aligned to the colour camera image.
      *
      * <p>Each joint is first located in depth-image pixel space via
-     * {@code get2DJoint(j, DEPTH_W, DEPTH_H)}.  The depth→colour UV map is
+     * {@code get2DJoint(j, DEPTH_W, DEPTH_H)}.  The depth->colour UV map is
      * then sampled at that pixel to obtain a normalised colour-image
      * coordinate, which is finally transformed into the letterbox draw rect.
      *
      * @param skeletons tracked skeletons from {@link KinectManager#getSkeletons()}
-     * @param depthUV   depth→colour UV map from {@link KinectManager#getDepthUV()};
+     * @param depthUV   depth->colour UV map from {@link KinectManager#getDepthUV()};
      *                  interleaved pairs {@code [u0, v0, u1, v1, ...]},
      *                  one entry per depth pixel (DEPTH_W × DEPTH_H)
      * @param drawX     left edge of the letterboxed image on screen
@@ -226,7 +226,7 @@ public class CameraVisualizer implements Visualizer {
 
     /**
      * Maps a skeleton joint to a 2-element {@code [screenX, screenY]} array
-     * within the letterboxed image rect using the depth→colour UV map.
+     * within the letterboxed image rect using the depth->colour UV map.
      *
      * <p>Returns {@code null} if the joint has no valid depth pixel or if its
      * colour-image UV lies outside [0, 1] (joint outside the colour FOV).
@@ -252,8 +252,8 @@ public class CameraVisualizer implements Visualizer {
         if (u < 0f || u > 1f || v < 0f || v > 1f) return null;
 
         // Step 3: convert UV to screen position inside the draw rect.
-        // U goes left→right: sx = drawX + u × drawW
-        // V goes top→bottom in image space; libGDX Y is bottom-up:
+        // U goes left->right: sx = drawX + u × drawW
+        // V goes top->bottom in image space; libGDX Y is bottom-up:
         //   sy = drawY + (1 − v) × drawH
         float sx = drawX + u * drawW;
         float sy = drawY + (1f - v) * drawH;
@@ -262,7 +262,7 @@ public class CameraVisualizer implements Visualizer {
     }
 
     // -----------------------------------------------------------------------
-    // BGRA → RGBA conversion (in-place into the Pixmap's native ByteBuffer)
+    // BGRA -> RGBA conversion (in-place into the Pixmap's native ByteBuffer)
     // -----------------------------------------------------------------------
 
     /**

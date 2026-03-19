@@ -1,6 +1,4 @@
-package at.njank.kinect;
-
-import com.example.capture.ScreenDuplicator;
+package capture.screen;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
@@ -8,8 +6,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 
 /**
- * Shared screen-capture manager used by {@link ScreenVisualizer} and
- * {@link ARVisualizer}.
+ * Shared screen-capture manager used by {@link at.njank.kinect.ARVisualizer}.
  *
  * <p>Owns one {@link ScreenDuplicator} and one GPU {@link Texture} that are
  * kept alive across both visualizers so only a single DXGI duplication session
@@ -26,7 +23,7 @@ import com.badlogic.gdx.graphics.Texture;
  * using the texture.
  *
  * <h3>Usage</h3>
- * Create once in {@link Main#create()}.  Call {@link #update()} once per frame
+ * Create once in {@link at.njank.kinect.Main#create()}.  Call {@link #update()} once per frame
  * from any visualizer that needs the texture (redundant calls within the same
  * frame are cheap because {@link ScreenDuplicator#captureFrame()} is
  * non-blocking).
@@ -67,7 +64,7 @@ public class ScreenCapture {
      * and allocates the GPU texture.
      *
      * <p>Must be called on the GL thread (inside a visualizer's
-     * {@code create()} or from {@link Main#create()}).
+     * {@code create()} or from {@link at.njank.kinect.Main#create()}).
      * Safe to call multiple times - disposes the old duplicator first.
      */
     public void init() {

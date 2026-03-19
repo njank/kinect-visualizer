@@ -1,5 +1,6 @@
 package at.njank.kinect;
 
+import capture.screen.ScreenCapture;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -26,7 +27,7 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
  * <ul>
  *   <li>H - toggle the entire HUD (tab bar + hints)</li>
  *   <li>S - toggle skeleton overlay on the active mode</li>
- *   <li>O - cycle AR overlay: NONE -> AUDIO -> LINEAR_DODGE -> SUBTRACT</li>
+ *   <li>O - cycle screen overlay: NONE -> LINEAR_DODGE -> SUBTRACT (AR mode)</li>
  *   <li>P - toggle 3-D projective screen rendering (AR + screen overlay only)</li>
  *   <li>M - cycle to the next monitor (AR screen overlay)</li>
  *   <li>R - reset orbit camera (AR / Depth modes)</li>
@@ -54,6 +55,13 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     private final Visualizer[] visualizers = new Visualizer[Mode.values().length];
     private Visualizer activeVis;
     private Mode       currentMode = Mode.CAMERA;
+
+    /**
+     * Saved orbit-camera states indexed by {@link Mode#ordinal()}.
+     * Populated when leaving a mode; restored when returning to it.
+     * Slots are null until a mode has been visited at least once.
+     */
+    private final float[][] savedOrbitState = new float[Mode.values().length][];
 
     /** Shared DXGI screen capture passed to ARVisualizer. */
     private ScreenCapture screenCapture;
@@ -149,6 +157,13 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     // -----------------------------------------------------------------------
 
     private void activateMode(Mode mode) {
+        // Save the current orbit state before leaving, so we can restore it on return
+        if (activeVis != null) {
+            OrbitCamera prevOrbit = getOrbit(currentMode);
+            if (prevOrbit != null)
+                savedOrbitState[currentMode.ordinal()] = prevOrbit.getState();
+        }
+
         currentMode = mode;
         int idx     = mode.ordinal();
 
@@ -159,6 +174,15 @@ public class Main extends ApplicationAdapter implements InputProcessor {
 
         activeVis = visualizers[idx];
         activeVis.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+        // Restore the orbit state if we have a saved one for this mode,
+        // then reseed the mouse so the first handleInput() delta is zero.
+        float[] saved = savedOrbitState[idx];
+        OrbitCamera orbit = getOrbit(mode);
+        if (orbit != null) {
+            if (saved != null) orbit.setState(saved);
+            orbit.seedMouse();
+        }
 
         inputMux.clear();
         inputMux.addProcessor(this);
@@ -172,6 +196,18 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             case AR     -> new ARVisualizer(screenCapture);
             case DEPTH  -> new DepthVisualizer();
         };
+    }
+
+    /**
+     * Returns the {@link OrbitCamera} for the given mode, or {@code null}
+     * if that mode has no orbit camera (e.g. Camera mode) or has not been
+     * created yet.
+     */
+    private OrbitCamera getOrbit(Mode mode) {
+        Visualizer v = visualizers[mode.ordinal()];
+        if (v instanceof ARVisualizer)    return ((ARVisualizer)    v).getOrbit();
+        if (v instanceof DepthVisualizer) return ((DepthVisualizer) v).getOrbit();
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -325,8 +361,10 @@ public class Main extends ApplicationAdapter implements InputProcessor {
                      || ar.getOverlay() == ARVisualizer.Overlay.SUBTRACT);
                 String projHint = isScreen
                     ? "  P:[proj " + (proj ? "ON" : "OFF") + "]" : "";
+                boolean audioOn = ar != null && ar.isAudioEnabled();
+                String audioHint = "  A:[audio " + (audioOn ? "ON" : "OFF") + "]";
                 return "Drag:orbit  R:reset  O:[" + overlayName + "]  M:monitor"
-                       + projHint + skelHint;
+                       + projHint + audioHint + skelHint;
             }
             case DEPTH:
             case CAMERA:
@@ -359,6 +397,13 @@ public class Main extends ApplicationAdapter implements InputProcessor {
                 if (currentMode == Mode.AR) {
                     ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
                     if (ar != null) ar.nextOverlay();
+                }
+                return true;
+
+            case Input.Keys.A:
+                if (currentMode == Mode.AR) {
+                    ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
+                    if (ar != null) ar.setAudioEnabled(!ar.isAudioEnabled());
                 }
                 return true;
 
