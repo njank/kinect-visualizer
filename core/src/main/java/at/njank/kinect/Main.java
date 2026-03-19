@@ -1,5 +1,6 @@
 package at.njank.kinect;
 
+import capture.screen.ScreenCapture;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -15,26 +16,23 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 /**
  * Application entry point and top-level orchestrator.
  *
- * <p>Four visualizer modes, selectable via the tab bar at the top of the
- * window or the number keys 1-4:
+ * <p>Three visualizer modes, selectable via the tab bar or number keys 1-3:
  * <pre>
- *   1 - Camera   colour feed with optional 2-D skeleton overlay
- *   2 - AR       UV-mapped 3-D point cloud coloured by the camera feed
- *   3 - Depth    depth point cloud coloured by distance (red→blue)
- *   4 - Audio    depth cloud with Z and colour intensified by system audio
+ *   1 - Camera   colour feed with optional skeleton overlay
+ *   2 - AR       UV-mapped 3-D point cloud + overlay toggle (O key)
+ *   3 - Depth    depth point cloud coloured by distance (red to blue)
  * </pre>
  *
- * <p>Modes 2-4 share {@link OrbitCamera} controls:
- * left-drag orbit · right-drag pan · scroll zoom · R reset.
- *
- * <p>Press {@code S} in any mode to toggle the skeleton overlay on/off.
- * The skeleton is hidden by default.
- *
- * <p>All visualizers implement {@link Visualizer} and are stored in a single
- * array indexed by {@link Mode#ordinal()}.  All modes are instantiated lazily
- * on first activation to avoid allocating GPU resources that may never be used.
- *
- * <p>Frame rate is capped to 60 FPS in {@code Lwjgl3Launcher}.
+ * <p>Global keys:
+ * <ul>
+ *   <li>H - toggle the entire HUD (tab bar + hints)</li>
+ *   <li>S - toggle skeleton overlay on the active mode</li>
+ *   <li>O - cycle screen overlay: NONE -> LINEAR_DODGE -> SUBTRACT (AR mode)</li>
+ *   <li>P - toggle 3-D projective screen rendering (AR + screen overlay only)</li>
+ *   <li>M - cycle to the next monitor (AR screen overlay)</li>
+ *   <li>R - reset orbit camera (AR / Depth modes)</li>
+ *   <li>Escape - quit</li>
+ * </ul>
  */
 public class Main extends ApplicationAdapter implements InputProcessor {
 
@@ -42,12 +40,10 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     // Modes
     // -----------------------------------------------------------------------
 
-    /** Ordered list of available visualizer modes (index == tab position). */
-    private enum Mode { CAMERA, AR, DEPTH, AUDIO }
+    private enum Mode { CAMERA, AR, DEPTH }
 
-    /** Tab labels shown in the HUD - must stay in the same order as {@link Mode}. */
     private static final String[] TAB_LABELS = {
-        "1  Camera", "2  AR", "3  Depth", "4  Audio"
+        "1  Camera", "2  AR", "3  Depth"
     };
 
     // -----------------------------------------------------------------------
@@ -56,27 +52,37 @@ public class Main extends ApplicationAdapter implements InputProcessor {
 
     private KinectManager kinect;
 
-    /**
-     * All visualizer instances indexed by {@link Mode#ordinal()}.
-     * Slots are null until the corresponding mode is activated for the first time.
-     */
     private final Visualizer[] visualizers = new Visualizer[Mode.values().length];
-
-    /** Convenience reference to {@code visualizers[currentMode.ordinal()]}. */
     private Visualizer activeVis;
+    private Mode       currentMode = Mode.CAMERA;
 
-    private Mode currentMode = Mode.CAMERA;
+    /**
+     * Saved orbit-camera states indexed by {@link Mode#ordinal()}.
+     * Populated when leaving a mode; restored when returning to it.
+     * Slots are null until a mode has been visited at least once.
+     */
+    private final float[][] savedOrbitState = new float[Mode.values().length][];
+
+    /** Shared DXGI screen capture passed to ARVisualizer. */
+    private ScreenCapture screenCapture;
 
     // -----------------------------------------------------------------------
-    // HUD resources
+    // HUD state
     // -----------------------------------------------------------------------
 
-    /** Height of the tab bar strip at the top of the window, in pixels. */
-    private static final float TAB_H   = 36f;
-    /** Horizontal padding on each side of a tab label, at base font scale. */
-    private static final float TAB_PAD = 20f;
-    /** Font scale used when all tabs fit comfortably in the window. */
-    private static final float FONT_BASE_SCALE = 1.1f;
+    /** When false the entire HUD (tab bar + hints + FPS) is hidden. Toggle: H. */
+    private boolean hudVisible = true;
+
+    /** Height of the tab bar strip in pixels. */
+    private static final float TAB_H            = 36f;
+    /** Horizontal padding inside each tab at base font scale. */
+    private static final float TAB_PAD          = 20f;
+    /** Base font scale used when all tabs fit. */
+    private static final float FONT_BASE_SCALE  = 1.1f;
+    /** Vertical padding above/below hint/FPS text inside the background pill. */
+    private static final float HINT_PAD_V       = 4f;
+    /** Horizontal padding left/right of hint/FPS text inside the background pill. */
+    private static final float HINT_PAD_H       = 8f;
 
     private SpriteBatch      hudBatch;
     private ShapeRenderer    hudShape;
@@ -98,6 +104,9 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         kinect = new KinectManager();
         kinect.start();
 
+        screenCapture = new ScreenCapture();
+        screenCapture.init();
+
         hudBatch = new SpriteBatch();
         hudShape = new ShapeRenderer();
         hudFont  = new BitmapFont();
@@ -107,13 +116,11 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         inputMux = new InputMultiplexer();
         Gdx.input.setInputProcessor(inputMux);
 
-        // Start in Camera mode so the user immediately sees the colour feed.
         activateMode(Mode.CAMERA);
     }
 
     @Override
     public void render() {
-        // Smooth FPS over 30-frame windows
         fpsAccum += Gdx.graphics.getDeltaTime();
         fpsFrames++;
         if (fpsFrames >= 30) {
@@ -123,7 +130,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         }
 
         activeVis.render(kinect);
-        drawHud();
+        if (hudVisible) drawHud();
     }
 
     @Override
@@ -139,6 +146,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         for (Visualizer v : visualizers) {
             if (v != null) v.dispose();
         }
+        screenCapture.dispose();
         hudBatch.dispose();
         hudShape.dispose();
         hudFont.dispose();
@@ -149,10 +157,16 @@ public class Main extends ApplicationAdapter implements InputProcessor {
     // -----------------------------------------------------------------------
 
     private void activateMode(Mode mode) {
+        // Save the current orbit state before leaving, so we can restore it on return
+        if (activeVis != null) {
+            OrbitCamera prevOrbit = getOrbit(currentMode);
+            if (prevOrbit != null)
+                savedOrbitState[currentMode.ordinal()] = prevOrbit.getState();
+        }
+
         currentMode = mode;
         int idx     = mode.ordinal();
 
-        // Lazy-init: create the visualizer on first use
         if (visualizers[idx] == null) {
             visualizers[idx] = buildVisualizer(mode);
             visualizers[idx].create();
@@ -161,21 +175,39 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         activeVis = visualizers[idx];
         activeVis.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
-        // Rebuild the input chain: global keys always have priority
+        // Restore the orbit state if we have a saved one for this mode,
+        // then reseed the mouse so the first handleInput() delta is zero.
+        float[] saved = savedOrbitState[idx];
+        OrbitCamera orbit = getOrbit(mode);
+        if (orbit != null) {
+            if (saved != null) orbit.setState(saved);
+            orbit.seedMouse();
+        }
+
         inputMux.clear();
         inputMux.addProcessor(this);
         InputProcessor vp = activeVis.getInputProcessor();
         if (vp != null) inputMux.addProcessor(vp);
     }
 
-    /** Constructs (but does not initialise) the visualizer for a given mode. */
-    private static Visualizer buildVisualizer(Mode mode) {
+    private Visualizer buildVisualizer(Mode mode) {
         return switch (mode) {
             case CAMERA -> new CameraVisualizer();
-            case AR     -> new ARVisualizer();
+            case AR     -> new ARVisualizer(screenCapture);
             case DEPTH  -> new DepthVisualizer();
-            case AUDIO  -> new AudioVisualizer();
         };
+    }
+
+    /**
+     * Returns the {@link OrbitCamera} for the given mode, or {@code null}
+     * if that mode has no orbit camera (e.g. Camera mode) or has not been
+     * created yet.
+     */
+    private OrbitCamera getOrbit(Mode mode) {
+        Visualizer v = visualizers[mode.ordinal()];
+        if (v instanceof ARVisualizer)    return ((ARVisualizer)    v).getOrbit();
+        if (v instanceof DepthVisualizer) return ((DepthVisualizer) v).getOrbit();
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -186,8 +218,10 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         final float sw = Gdx.graphics.getWidth();
         final float sh = Gdx.graphics.getHeight();
 
-        // --- Compute a scale so all tabs always fit the window width ---
-        // First measure at base scale to find the natural total width.
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+
+        // ---- Tab bar ----
         hudFont.getData().setScale(FONT_BASE_SCALE);
         float[] tabW   = new float[TAB_LABELS.length];
         float   totalW = 0;
@@ -196,7 +230,6 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             tabW[i] = layout.width + TAB_PAD * 2;
             totalW  += tabW[i];
         }
-        // If tabs overflow, scale down uniformly to fit within 96% of the window
         float tabScale = Math.min(1f, (sw * 0.96f) / totalW);
         if (tabScale < 1f) {
             hudFont.getData().setScale(FONT_BASE_SCALE * tabScale);
@@ -211,21 +244,17 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         final float startX = (sw - totalW) / 2f;
         final float tabY   = sh - TAB_H;
 
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-
-        // --- Tab strip background ---
+        // Tab strip background
         hudShape.begin(ShapeRenderer.ShapeType.Filled);
-        hudShape.setColor(0f, 0f, 0f, 0.58f);
+        hudShape.setColor(0f, 0f, 0f, 0.65f);
         hudShape.rect(0, tabY - 2, sw, TAB_H + 2);
         hudShape.end();
 
-        // --- Individual tab backgrounds ---
+        // Individual tab backgrounds
         hudShape.begin(ShapeRenderer.ShapeType.Filled);
         float x = startX;
         for (int i = 0; i < TAB_LABELS.length; i++) {
             if (i == currentMode.ordinal()) {
-                // Active tab: dimmed version of the mode's accent colour
                 Color ac = SkeletonConstants.SKELETON_COLORS[i];
                 hudShape.setColor(ac.r * 0.25f, ac.g * 0.25f, ac.b * 0.25f, 0.92f);
             } else {
@@ -236,7 +265,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         }
         hudShape.end();
 
-        // --- Active tab top accent bar ---
+        // Active tab top accent bar
         hudShape.begin(ShapeRenderer.ShapeType.Filled);
         x = startX;
         for (int i = 0; i < TAB_LABELS.length; i++) {
@@ -248,9 +277,59 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         }
         hudShape.end();
 
-        // --- Tab labels + HUD hints ---
-        hudBatch.begin();
+        hudFont.getData().setScale(FONT_BASE_SCALE);
 
+        // ---- Hint text (bottom-left) with dark background ----
+        String hint = buildHint();
+        if (!hint.isEmpty()) {
+            layout.setText(hudFont, hint);
+            float hintW = layout.width;
+            float hintH = layout.height;
+            float bgX   = 8f;
+            float bgY   = 8f; // bottom of background rect
+
+            // Dark pill behind the hint text
+            hudShape.begin(ShapeRenderer.ShapeType.Filled);
+            hudShape.setColor(0f, 0f, 0f, 0.60f);
+            hudShape.rect(bgX, bgY,
+                hintW + HINT_PAD_H * 2,
+                hintH + HINT_PAD_V * 2);
+            hudShape.end();
+
+            hudBatch.begin();
+            hudFont.setColor(0.85f, 0.85f, 0.88f, 1f);
+            hudFont.draw(hudBatch, hint,
+                bgX + HINT_PAD_H,
+                bgY + HINT_PAD_V + hintH); // BitmapFont draw y is the baseline/top
+            hudBatch.end();
+        }
+
+        // ---- FPS counter (bottom-right) with dark background ----
+        String fpsStr = fpsDisplay + " FPS";
+        layout.setText(hudFont, fpsStr);
+        float fpsW  = layout.width;
+        float fpsH  = layout.height;
+        float fBgX  = sw - fpsW - HINT_PAD_H * 2 - 8f;
+        float fBgY  = 8f;
+
+        hudShape.begin(ShapeRenderer.ShapeType.Filled);
+        hudShape.setColor(0f, 0f, 0f, 0.60f);
+        hudShape.rect(fBgX, fBgY,
+            fpsW + HINT_PAD_H * 2,
+            fpsH + HINT_PAD_V * 2);
+        hudShape.end();
+
+        Color fpsCol = fpsDisplay >= 55 ? new Color(0.3f, 1f,   0.3f,  1f)
+                     : fpsDisplay >= 30 ? new Color(1f,   0.85f, 0.2f, 1f)
+                     :                    new Color(1f,   0.3f,  0.3f, 1f);
+
+        hudBatch.begin();
+        hudFont.setColor(fpsCol);
+        hudFont.draw(hudBatch, fpsStr,
+            fBgX + HINT_PAD_H,
+            fBgY + HINT_PAD_V + fpsH);
+
+        // Tab labels (drawn last so they sit on top of their backgrounds)
         x = startX;
         for (int i = 0; i < TAB_LABELS.length; i++) {
             layout.setText(hudFont, TAB_LABELS[i]);
@@ -263,41 +342,36 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             x += tabW[i];
         }
 
-        // Restore base scale for hint / fps text
-        hudFont.getData().setScale(FONT_BASE_SCALE);
-
-        // Bottom-left hints: orbit controls (3-D modes) + skeleton toggle
-        boolean hasOrbit = currentMode == Mode.AR
-                        || currentMode == Mode.DEPTH
-                        || currentMode == Mode.AUDIO;
-        boolean skelOn = activeVis.isSkeletonEnabled();
-
-        String skelHint = "S: skeleton " + (skelOn ? "[ON]" : "[OFF]");
-        if (hasOrbit) {
-            // Two lines: orbit on top, skeleton below
-            hudFont.setColor(0.40f, 0.40f, 0.45f, 1f);
-            hudFont.draw(hudBatch,
-                "Left-drag: orbit   Right-drag: pan   Scroll: zoom   R: reset   " + skelHint,
-                10, 18);
-        } else {
-            // Camera mode: just show skeleton toggle
-            hudFont.setColor(skelOn
-                ? new Color(0.55f, 0.90f, 0.55f, 1f)   // green tint when on
-                : new Color(0.40f, 0.40f, 0.45f, 1f));  // dim when off
-            hudFont.draw(hudBatch, skelHint, 10, 18);
-        }
-
-        // FPS counter (bottom-right), colour-coded green/yellow/red
-        String fpsStr = fpsDisplay + " FPS";
-        layout.setText(hudFont, fpsStr);
-        Color fpsCol = fpsDisplay >= 55 ? new Color(0.3f, 1f,   0.3f,  1f)
-                     : fpsDisplay >= 30 ? new Color(1f,   0.85f, 0.2f, 1f)
-                     :                    new Color(1f,   0.3f,  0.3f, 1f);
-        hudFont.setColor(fpsCol);
-        hudFont.draw(hudBatch, fpsStr, sw - layout.width - 10, 18);
-
         hudBatch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    /** Builds the context-sensitive hint string for the current mode. */
+    private String buildHint() {
+        boolean skelOn   = activeVis.isSkeletonEnabled();
+        String  skelHint = "  S:[skel " + (skelOn ? "ON" : "OFF") + "]";
+
+        switch (currentMode) {
+            case AR: {
+                ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
+                String overlayName = ar != null ? ar.getOverlay().name() : "NONE";
+                boolean proj = ar != null && ar.isScreenProjected();
+                boolean isScreen = ar != null
+                    && (ar.getOverlay() == ARVisualizer.Overlay.LINEAR_DODGE
+                     || ar.getOverlay() == ARVisualizer.Overlay.SUBTRACT);
+                String projHint = isScreen
+                    ? "  P:[proj " + (proj ? "ON" : "OFF") + "]" : "";
+                boolean audioOn = ar != null && ar.isAudioEnabled();
+                String audioHint = "  A:[audio " + (audioOn ? "ON" : "OFF") + "]";
+                return "Drag:orbit  R:reset  O:[" + overlayName + "]  M:monitor"
+                       + projHint + audioHint + skelHint;
+            }
+            case DEPTH:
+            case CAMERA:
+                return skelHint.trim();
+            default:
+                return "";
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -310,15 +384,44 @@ public class Main extends ApplicationAdapter implements InputProcessor {
             case Input.Keys.NUM_1: activateMode(Mode.CAMERA); return true;
             case Input.Keys.NUM_2: activateMode(Mode.AR);     return true;
             case Input.Keys.NUM_3: activateMode(Mode.DEPTH);  return true;
-            case Input.Keys.NUM_4: activateMode(Mode.AUDIO);  return true;
+
+            case Input.Keys.H:
+                hudVisible = !hudVisible;
+                return true;
+
             case Input.Keys.S:
-                // Toggle skeleton overlay on the active visualizer
                 activeVis.setSkeletonEnabled(!activeVis.isSkeletonEnabled());
                 return true;
+
+            case Input.Keys.O:
+                if (currentMode == Mode.AR) {
+                    ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
+                    if (ar != null) ar.nextOverlay();
+                }
+                return true;
+
+            case Input.Keys.A:
+                if (currentMode == Mode.AR) {
+                    ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
+                    if (ar != null) ar.setAudioEnabled(!ar.isAudioEnabled());
+                }
+                return true;
+
+            case Input.Keys.P:
+                if (currentMode == Mode.AR) {
+                    ARVisualizer ar = (ARVisualizer) visualizers[Mode.AR.ordinal()];
+                    if (ar != null) ar.setScreenProjected(!ar.isScreenProjected());
+                }
+                return true;
+
+            case Input.Keys.M:
+                screenCapture.nextMonitor();
+                return true;
+
             case Input.Keys.R:
-                // Delegate camera reset to the active visualizer (no-op for Camera mode)
                 activeVis.resetCamera();
                 return true;
+
             case Input.Keys.ESCAPE:
                 Gdx.app.exit();
                 return true;
@@ -326,17 +429,17 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         return false;
     }
 
-    /** Handles tab-bar clicks. Converts screen-space Y before hit-testing. */
+    /** Handles tab-bar clicks. */
     @Override
     public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+        if (!hudVisible) return false;
+
         final float sw   = Gdx.graphics.getWidth();
         final float sh   = Gdx.graphics.getHeight();
-        final float gdxY = sh - screenY; // libGDX Y is bottom-up
+        final float gdxY = sh - screenY;
 
-        // Only intercept clicks in the tab strip
         if (gdxY < sh - TAB_H) return false;
 
-        // Re-measure tabs with current font scale to get accurate hit boxes
         hudFont.getData().setScale(FONT_BASE_SCALE);
         float[] tabW   = new float[TAB_LABELS.length];
         float   totalW = 0;
@@ -355,7 +458,7 @@ public class Main extends ApplicationAdapter implements InputProcessor {
                 totalW  += tabW[i];
             }
         }
-        hudFont.getData().setScale(FONT_BASE_SCALE); // restore
+        hudFont.getData().setScale(FONT_BASE_SCALE);
 
         float x = (sw - totalW) / 2f;
         for (int i = 0; i < TAB_LABELS.length; i++) {
@@ -368,7 +471,6 @@ public class Main extends ApplicationAdapter implements InputProcessor {
         return false;
     }
 
-    // Unused InputProcessor methods
     @Override public boolean keyUp(int k)                                { return false; }
     @Override public boolean keyTyped(char c)                            { return false; }
     @Override public boolean touchUp(int x, int y, int p, int b)        { return false; }

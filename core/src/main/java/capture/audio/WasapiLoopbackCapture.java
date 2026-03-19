@@ -1,4 +1,4 @@
-package at.njank.kinect;
+package capture.audio;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
@@ -8,8 +8,8 @@ import com.sun.jna.ptr.IntByReference;
  * JNA wrapper around WasapiLoopback.dll.
  *
  * <p>Captures system audio via WASAPI loopback (what-you-hear) so that
- * {@link AudioVisualizer} can react to any audio playing on the default
- * playback device — no Kinect microphone required, and no Windows
+ * the calling class can react to any audio playing on the default
+ * playback device - no Kinect microphone required, and no Windows
  * "Stereo Mix" setting needs to be enabled.
  *
  * <h3>Requirements</h3>
@@ -29,7 +29,7 @@ import com.sun.jna.ptr.IntByReference;
 public class WasapiLoopbackCapture {
 
     // -----------------------------------------------------------------------
-    // JNA interface — mirrors WasapiCapture.h exactly
+    // JNA interface - mirrors WasapiCapture.h exactly
     // -----------------------------------------------------------------------
 
     interface WasapiLib extends Library {
@@ -114,7 +114,7 @@ public class WasapiLoopbackCapture {
     public int getSampleRate() { return sampleRate; }
 
     // -----------------------------------------------------------------------
-    // Sample access — called from the render thread
+    // Sample access - called from the render thread
     // -----------------------------------------------------------------------
 
     /**
@@ -161,7 +161,7 @@ public class WasapiLoopbackCapture {
 
             int frames = framesRead.getValue();
             if (frames == 0) {
-                // No audio currently playing — yield briefly
+                // No audio currently playing - yield briefly
                 try { Thread.sleep(5); } catch (InterruptedException ignored) {}
                 continue;
             }
